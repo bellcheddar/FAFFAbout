@@ -112,9 +112,14 @@ SAMPLE = """<?xml version="1.0" encoding="ISO-8859-1"?>
         <statusHistory id="3"><lab>JCSG</lab><status>in PDB</status><dateComplete>2012-04-04</dateComplete></statusHistory>
       </statusHistoryList>
       <stopDetails><stopStatus>structure successful</stopStatus></stopDetails>
-      <trialSequenceList><trialSequence id="1"><oneLetterCode>GSMKTAYIAKQR</oneLetterCode>
-        <sequenceConstructType>tagged protein</sequenceConstructType>
-        <sequenceDetails>N-terminal His tag</sequenceDetails></trialSequence></trialSequenceList>
+      <trialSequenceList>
+        <trialSequence id="1"><oneLetterCode>ATGTCCCTTAAGGAAAATGTACGTGCATCACCACTGA</oneLetterCode>
+          <sequenceChemicalType>dna</sequenceChemicalType></trialSequence>
+        <trialSequence id="2"><oneLetterCode>GSMKTAYIAKQR</oneLetterCode>
+          <sequenceChemicalType>protein</sequenceChemicalType>
+          <sequenceConstructType>tagged protein</sequenceConstructType>
+          <sequenceDetails>N-terminal His tag</sequenceDetails></trialSequence>
+      </trialSequenceList>
       <trialProtocolList><protocolRef id="1"><protocolId>P1</protocolId><protocolType>expression</protocolType></protocolRef></trialProtocolList>
     </trial>
   </trialList>
@@ -198,3 +203,65 @@ def test_schemas_accept_rows(parsed):
     pa.Table.from_pylist(parsed["hist"], schema=parse.SCHEMAS["status_history"])
     pa.Table.from_pylist(parsed["trials"], schema=parse.SCHEMAS["trials"])
     pa.Table.from_pylist([parsed["protocol"]], schema=parse.SCHEMAS["protocols"])
+
+
+# --------------------------------------------------------------------------- DNA vs protein
+# Whole centres list the DNA construct first in trialSequenceList (NYCOMPS, MPP, NatPro,
+# TMPC and TEMIMPS at 100%, CESG 86%, SGX 87%, NYSGXRC 64%): 90,746 trials, 9.4% of the
+# archive. Taking tseqs[0] blindly put a gene in the protein column at ~3x the length.
+
+def test_trial_sequence_prefers_protein_over_dna(parsed):
+    tr = parsed["trials"][0]
+    assert tr["sequence"] == "GSMKTAYIAKQR"
+    assert tr["seq_len"] == 12
+    assert tr["chem_type"] == "protein"
+
+
+def test_trial_dna_sequence_is_kept_not_discarded(parsed):
+    tr = parsed["trials"][0]
+    assert tr["sequence_dna"] == "ATGTCCCTTAAGGAAAATGTACGTGCATCACCACTGA"
+    assert tr["seq_len_dna"] == 37
+
+
+def test_details_found_on_a_sibling_sequence_element(parsed):
+    # the details sit on trialSequence id=2, not on the first element
+    assert parsed["trials"][0]["sequence_details"] == "N-terminal His tag"
+    assert parsed["trials"][0]["construct_type"] == "tagged protein"
+
+
+@pytest.mark.parametrize("seq,expected", [
+    ("ATGTCCCTTAAGGAAAATGTACGTG", True),
+    ("GSMKTAYIAKQR", False),
+    ("MAHHHHHHMGTLEAQTQGPGSMVAS", False),
+    ("ACGT", False),          # too short to call
+    ("", False),
+    ("MKTAYIAKQRSTNEVLWFPHDG", False),     # a real protein: plenty of non-ACGTUN residues
+    # Accepted edge case: a 24-residue protein of only Met/Cys/Gly/Ala/Thr is 95.8%
+    # ACGTUN and is called nucleotide. Harmless, because pick_trial_sequences falls back
+    # to the first element when every sequence looks nucleotide, so nothing is dropped.
+    ("MCGATTACAGATTACAGATTACAG", True),
+])
+def test_is_nucleotide(seq, expected):
+    assert parse.is_nucleotide(seq) is expected
+
+
+def test_unlabelled_dna_still_detected_by_composition():
+    """16,931 rows carry no sequenceChemicalType element at all, so the label cannot be trusted."""
+    xml = ("<trialSequenceList>"
+           "<trialSequence id='1'><oneLetterCode>ATGTCCCTTAAGGAAAATGTACGTGCATCACC</oneLetterCode></trialSequence>"
+           "<trialSequence id='2'><oneLetterCode>GSMKTAYIAKQR</oneLetterCode></trialSequence>"
+           "</trialSequenceList>")
+    el = etree.fromstring(xml)
+    _, prot, dna = parse.pick_trial_sequences(list(el.iterfind("trialSequence")))
+    assert prot == "GSMKTAYIAKQR"
+    assert dna == "ATGTCCCTTAAGGAAAATGTACGTGCATCACC"
+
+
+def test_falls_back_to_first_when_all_look_nucleotide():
+    xml = ("<trialSequenceList>"
+           "<trialSequence id='1'><oneLetterCode>ATGTCCCTTAAGGAAAATGTACGTG</oneLetterCode></trialSequence>"
+           "</trialSequenceList>")
+    el = etree.fromstring(xml)
+    _, prot, dna = parse.pick_trial_sequences(list(el.iterfind("trialSequence")))
+    assert prot == "ATGTCCCTTAAGGAAAATGTACGTG"   # nothing dropped
+    assert dna == "ATGTCCCTTAAGGAAAATGTACGTG"

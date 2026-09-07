@@ -2,7 +2,7 @@
 
 > **Fine-tuned Attrition Forecasting From Archives: know where your protein is likely to die before you order the gene.**
 
-![python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white) ![lxml](https://img.shields.io/badge/lxml-6.1-467FF7) ![pyarrow](https://img.shields.io/badge/pyarrow-25.0-467FF7) ![duckdb](https://img.shields.io/badge/duckdb-1.5-FFF000?logo=duckdb&logoColor=black) ![pandas](https://img.shields.io/badge/pandas-3.0-150458?logo=pandas&logoColor=white) ![mmseqs2](https://img.shields.io/badge/MMseqs2-18-00897B) ![targets](https://img.shields.io/badge/targets-335%2C771-467FF7) ![status events](https://img.shields.io/badge/status%20events-3.78M-467FF7) ![clusters](https://img.shields.io/badge/clusters%20(30%25%20id)-88%2C452-467FF7) ![tests](https://img.shields.io/badge/pytest-13%20passing-00897B) ![data](https://img.shields.io/badge/data-PSI%20TargetTrack%20%C2%B7%20CC--BY--SA--4.0-9b51e0) ![phase 1](https://img.shields.io/badge/phase%201-complete-fcb900) ![phase 2](https://img.shields.io/badge/phase%202-in%20progress-fcb900) [![MLX-LM](https://img.shields.io/badge/MLX--LM-Apple%20Silicon-000000?logo=apple&logoColor=white)](https://github.com/ml-explore/mlx-lm) ![author](https://img.shields.io/badge/author-Marc%20C.%20Deller%2C%20D.Phil.-1C244B)
+![python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white) ![lxml](https://img.shields.io/badge/lxml-6.1-467FF7) ![pyarrow](https://img.shields.io/badge/pyarrow-25.0-467FF7) ![duckdb](https://img.shields.io/badge/duckdb-1.5-FFF000?logo=duckdb&logoColor=black) ![pandas](https://img.shields.io/badge/pandas-3.0-150458?logo=pandas&logoColor=white) ![mmseqs2](https://img.shields.io/badge/MMseqs2-18-00897B) ![targets](https://img.shields.io/badge/targets-335%2C771-467FF7) ![status events](https://img.shields.io/badge/status%20events-3.78M-467FF7) ![clusters](https://img.shields.io/badge/clusters%20(30%25%20id)-88%2C452-467FF7) ![tests](https://img.shields.io/badge/pytest-38%20passing-00897B) ![data](https://img.shields.io/badge/data-PSI%20TargetTrack%20%C2%B7%20CC--BY--SA--4.0-9b51e0) ![phase 1](https://img.shields.io/badge/phase%201-complete-fcb900) ![censored](https://img.shields.io/badge/censored-19.03%25-9b51e0) ![phase 2](https://img.shields.io/badge/phase%202-in%20progress-fcb900) [![MLX-LM](https://img.shields.io/badge/MLX--LM-Apple%20Silicon-000000?logo=apple&logoColor=white)](https://github.com/ml-explore/mlx-lm) ![author](https://img.shields.io/badge/author-Marc%20C.%20Deller%2C%20D.Phil.-1C244B)
 
 <table>
 <tr>
@@ -53,6 +53,7 @@ brew install mmseqs2
 | 4. Cluster | `bash scripts/04_cluster_sequences.sh` | `data/clusters/tt30_clusters.parquet` | 2 min, 10 threads |
 | 5. Query layer | `.venv/bin/python scripts/build_duckdb.py` | `data/faffabout.duckdb` (views) plus the acceptance report | seconds |
 | Optional | `.venv/bin/python scripts/fetch_pdb_metadata.py` | fills `outcomes.resolution` from RCSB | 2 min |
+| 6. Censoring | `.venv/bin/python scripts/censoring.py` | `data/parquet/censoring/` plus the censoring report | seconds |
 
 Flags:
 
@@ -77,7 +78,8 @@ All tables live in `data/parquet/` and are exposed as DuckDB views of the same n
 | `target_sequences` | one row per target sequence (complexes carry several) | 385,139 | `target_id`, `seq_idx`, `is_primary`, `sequence`, `chem_type`, `construct_type` |
 | `status_history` | one row per status event | 3,783,070 | `target_id`, `trial_id`, `history_id`, `status_raw`, `status_date`, `step_duration_days` |
 | `status_history_canon` | `status_history` joined to the canonical map | 3,783,070 | adds `status_canon`, `stage_ord`, `method`, `terminal` |
-| `trials` | one row per experimental attempt | 961,548 | `target_id`, `trial_id`, `status_raw`, `stop_status`, `protocol_refs`, `protocol_types`, `sequence`, `construct_type`, `free_text_notes` |
+| `trials` | one row per experimental attempt | 961,548 | `target_id`, `trial_id`, `status_raw`, `stop_status`, `protocol_refs`, `protocol_types`, `sequence` (protein), `sequence_dna`, `construct_type`, `free_text_notes` |
+| `censoring` | one row per target | 335,771 | `censored`, `censored_reason`, `censored_centre_winddown`, `censored_bulk_closure`, `last_any`, `wind_down`, `on_bulk_closure_date` |
 | `protocols` | one row per protocol (free text) | 1,501 | `protocol_id`, `centre`, `protocol_type`, `text` |
 | `outcomes` | one row per PDB deposition | 11,954 | `target_id`, `pdb_id`, `method`, `resolution`, `deposit_date`, `source` |
 | `target_stage` | one row per target | 335,771 | `max_stage`, `method`, `n_events`, `first_event`, `last_event`, `stopped` |
@@ -159,6 +161,24 @@ Every one of the 88,452 clusters is a unit for splitting: 50,114 are singletons 
 
 Tests: `.venv/bin/python -m pytest -q` (status-map integrity and the parser on a synthetic target).
 
+## 🪦 Censoring: the result that decides the project
+
+The specification's rule (per-centre 99.5th-percentile last-activity date, 180-day window) censors **5.22%** of the archive, against its own stated expectation of 15 to 20%. It misses the mass closures entirely, and those are the whole phenomenon: NESG stopped **34,605 targets on 2010-06-30**, 99.6% of every stop it ever recorded, while its 99.5th-percentile last-activity date sits at 2015-02-25, five years later. Not one of those targets falls inside a 180-day window.
+
+FAFFAbout therefore applies a second rule alongside it. A **bulk closure** is a single date on which one centre stopped at least 200 targets amounting to at least 5% of all the stops it ever recorded. That is an administrative act, which is precisely the mechanism the specification describes, observed directly rather than inferred from a quantile.
+
+| Rule | Targets | Share |
+|---|---|---|
+| Bulk closure only | 46,367 | 13.81% |
+| Centre wind-down only | 14,627 | 4.36% |
+| Both | 2,898 | 0.86% |
+| **Censored (either)** | **63,892** | **19.03%** |
+| Not censored | 271,879 | 80.97% |
+
+Thirteen bulk-closure dates are detected across seven centres. The rule is validated by a column that was not used to build it: on a bulk-closure date, **93.4% of stop reasons are "other" or "duplicate target found"** and only 6.5% name an experimental failure, whereas every other stop in the archive names a specific scientific cause 68% of the time (expression failed 33.3%, cloning failed 14.3%, purification failed 12.7%). Administrative closure and experimental failure look completely different, and the rule separates them.
+
+The per-centre picture is the reason none of this can be skipped. JCSG censors at 0% (it never used the `work stopped` marker and stayed active until 2016), NESG at 58.5%, CESG at 47.6%. A model trained without this correction would learn the funding history of US structural genomics, and it would learn it very well.
+
 ## 🎓 Roadmap and the science
 
 The full plan is in `PROJECT_PLAN.md` and the specification in `faffabout_build_spec_v1.md`. The parts that matter most:
@@ -177,7 +197,7 @@ The full plan is in `PROJECT_PLAN.md` and the specification in `faffabout_build_
 - [x] **Phase 1: cluster.** `04_cluster_sequences.sh` runs MMseqs2 at 30% identity and resolves every distinct protein sequence to a cluster id
 - [x] **Phase 1: query layer and acceptance.** `build_duckdb.py` attaches DuckDB views over the Parquet directory and prints the acceptance report
 - [x] **Phase 1: PDB resolution.** `fetch_pdb_metadata.py` fills `outcomes.resolution` from RCSB: 11,607 of 11,802 distinct ids resolve (the rest are obsolete), 9,440 carry a resolution
-- [ ] **Phase 2: censoring.** Per-centre 99.5th-percentile last-activity date, 180-day window, global freeze; `censored` as a first-class boolean
+- [x] **Phase 2: censoring.** Two rules in `scripts/censoring.py`, both stored separately and configurable in `config/labels.yaml`: the specification's per-centre wind-down (99.5th-percentile last activity, 180-day window, plus the global freeze) and a new bulk-closure detector. 19.03% of the archive is censored, inside the 12 to 22% gate
 - [ ] **Phase 2: labels.** L1 gate transitions, L2 terminal outcomes, L3 preference pairs, with the four negative-mining rules in code
 - [ ] **Phase 2: features.** Composition, topology, annotation, construct and archive-context features; ESM-2 disorder on ZeroGPU cached by `seq_md5`; never the raw sequence in a prompt
 - [ ] **Phase 2: splits and SFT.** Cluster, centre and temporal splits; five-task chat JSONL with 8 to 12 paraphrases per template, sorted by token length

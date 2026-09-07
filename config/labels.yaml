@@ -1,0 +1,48 @@
+# FAFFAbout Phase 2 label configuration.
+#
+# Censoring is the highest-priority correctness issue in the project: a target parked below
+# the top gate on 30 June 2017 is failed, censored (its centre's file closed with work
+# incomplete) or still in flight. Treating all three as negatives trains a model to predict
+# when US funding programmes ended.
+
+archive:
+  # TargetTrack's final generation date. Everything after this is a data error.
+  freeze_date: 2017-06-30
+  # Dates outside this window are treated as missing rather than clamped: the archive
+  # carries 5,244 of them (CSGID 5,136 on 1979-01-01, MCSG 81 on 1969-12-31, a handful
+  # after the freeze, and one in the year 0013). Clamping a 1979 date onto the timeline
+  # would drag a centre's quantile backwards and silently mis-censor its whole cohort.
+  valid_from: 1995-01-01
+
+censoring:
+  # --- Rule A: centre wind-down (the specification's rule, section 5.1) -----------------
+  # For each centre take a high quantile of its targets' last activity date: the point
+  # after which it effectively stopped reporting. A target below the top gate whose own
+  # last activity falls within `window_days` of that point was still open when the centre
+  # went quiet, so its fate is unknown.
+  centre_quantile: 0.995
+  window_days: 180
+  # The same window against the global archive freeze, for targets still active in 2017.
+  apply_freeze_window: true
+
+  # --- Rule B: bulk closure (added 2026-09-07, see PROJECT_PLAN.md decisions log) -------
+  # Rule A alone censors 5.2% of the archive against the specification's own stated
+  # expectation of 15 to 20% and its acceptance gate of 12 to 22%. It misses the largest
+  # censoring events outright: NESG closed 34,605 targets on a single day, 2010-06-30,
+  # which is 99.6% of every stop it ever recorded, yet its 99.5th-percentile last-activity
+  # date is 2015-02-25, so not one of them falls inside a 180-day window.
+  #
+  # A mass file-closure on one date is direct evidence of the mechanism the specification
+  # describes ("the centre's funding ended and the file closed with work incomplete"),
+  # rather than a proxy for it. A centre stopping this many targets on one day is an
+  # administrative act, not an experimental result.
+  bulk_closure:
+    enabled: true
+    min_targets: 200      # absolute floor, so small centres cannot trip it on noise
+    min_pct_of_centre_stops: 5.0   # and it must be a real share of that centre's stops
+
+  # Expected outcome of A OR B, measured 2026-09-07: 19.03% of the archive.
+  # Acceptance gate from the specification: between 12 and 22%.
+  acceptance:
+    min_pct: 12.0
+    max_pct: 22.0

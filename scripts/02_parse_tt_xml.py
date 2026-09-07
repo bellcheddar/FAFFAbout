@@ -168,9 +168,11 @@ SCHEMAS = {
         ("protocol_types", pa.string()),   # "|"-joined, order preserved
         ("protocol_details", pa.string()),
         ("n_sequences", pa.int32()),
-        ("sequence", pa.string()),         # first trialSequence (the construct actually made)
+        ("sequence", pa.string()),         # the PROTEIN construct actually made (see pick_trial_sequences)
         ("seq_md5", pa.string()),
         ("seq_len", pa.int32()),
+        ("sequence_dna", pa.string()),     # the gene, where the centre listed one (codon optimisation)
+        ("seq_len_dna", pa.int32()),
         ("chem_type", pa.string()),
         ("construct_type", pa.string()),
         ("sequence_modifications", pa.string()),
@@ -347,13 +349,12 @@ def extract_target(el, known: set[str], source_file: str) -> tuple[dict, list, l
             })
         all_dates.extend(dates)
         tseqs = list(t.iterfind("trialSequenceList/trialSequence"))
-        first = tseqs[0] if tseqs else None
-        tseq = clean_seq(first.findtext("oneLetterCode")) if first is not None else ""
+        first, tseq, tseq_dna = pick_trial_sequences(tseqs)
         prefs = list(t.iterfind("trialProtocolList/protocolRef"))
         stop = t.find("stopDetails")
         outcome = texts(t, "trialOutcomeList/trialOutcome/outcomeDetails")
-        seq_mod = text(first, "sequenceModifications") if first is not None else ""
-        seq_det = text(first, "sequenceDetails") if first is not None else ""
+        seq_mod = next((text(e, "sequenceModifications") for e in tseqs if text(e, "sequenceModifications")), "")
+        seq_det = next((text(e, "sequenceDetails") for e in tseqs if text(e, "sequenceDetails")), "")
         stop_remark = text(stop, "remark") if stop is not None else ""
         notes = join([seq_mod, seq_det, stop_remark] + outcome
                      + [r for r in texts(t, "statusHistoryList/statusHistory/remark")])
@@ -373,6 +374,8 @@ def extract_target(el, known: set[str], source_file: str) -> tuple[dict, list, l
             "sequence": tseq,
             "seq_md5": md5(tseq),
             "seq_len": len(tseq),
+            "sequence_dna": tseq_dna,
+            "seq_len_dna": len(tseq_dna),
             "chem_type": text(first, "sequenceChemicalType") if first is not None else "",
             "construct_type": join(texts(first, "sequenceConstructType")) if first is not None else "",
             "sequence_modifications": seq_mod,
@@ -431,6 +434,36 @@ def extract_target(el, known: set[str], source_file: str) -> tuple[dict, list, l
         "last_seen": max(seen) if seen else "",
     }
     return row, seq_rows, hist_rows, trial_rows
+
+
+_NT = set("ACGTUN")
+
+
+def is_nucleotide(seq: str) -> bool:
+    """True if the string is (almost) pure ACGTUN, i.e. a gene rather than a protein.
+
+    Whole centres (NYCOMPS, MPP, NatPro, TMPC, TEMIMPS at 100%, CESG 86%, SGX 87%,
+    NYSGXRC 64%) list the DNA construct first in trialSequenceList, and 16,931 of those
+    rows carry no sequenceChemicalType element at all (it is minOccurs="0"), so the
+    recorded label cannot be trusted on its own. Composition can.
+    """
+    if len(seq) < 12:
+        return False
+    return sum(ch in _NT for ch in seq) / len(seq) > 0.95
+
+
+def pick_trial_sequences(tseqs):
+    """(protein_element, protein_seq, dna_seq) from a trial's sequence list.
+
+    Prefers an element recorded as protein whose composition agrees; falls back to the
+    first non-nucleotide sequence; finally to the first element, so nothing is dropped.
+    """
+    parsed = [(el, clean_seq(el.findtext("oneLetterCode"))) for el in tseqs]
+    prot = [(el, sq) for el, sq in parsed if sq and not is_nucleotide(sq)]
+    dna = [(el, sq) for el, sq in parsed if sq and is_nucleotide(sq)]
+    labelled = [(el, sq) for el, sq in prot if text(el, "sequenceChemicalType") == "protein"]
+    pick = (labelled or prot or parsed or [(None, "")])[0]
+    return pick[0], pick[1], (dna[0][1] if dna else "")
 
 
 def db_refs_from_row(seq_row: dict) -> list[tuple[str, str]]:
