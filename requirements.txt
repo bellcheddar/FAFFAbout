@@ -11,4 +11,6 @@ requests>=2.31         # Zenodo record metadata + download
 tqdm>=4.66             # progress bars on the multi-GB stream
 biopython>=1.83        # independent cross-check for pI and GRAVY in the tests
 numpy>=1.26            # vectorised sequence features
+lightgbm>=4.5          # the gradient-boosted baseline the LLM must clear
+scikit-learn>=1.5      # AUROC, Brier
 pytest>=8.0            # tests/

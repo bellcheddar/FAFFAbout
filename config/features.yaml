@@ -1,0 +1,126 @@
+# FAFFAbout feature provenance.
+#
+# THE POINT OF THIS FILE. FAFFAbout answers a question asked BEFORE the gene is ordered.
+# Anything recorded while the attempt was running is not available then, and using it as a
+# model input predicts the past from itself.
+#
+# Measured on 2026-09-07, at gate 4 (purified -> crystallised), the post-hoc block gives
+# the answer away outright:
+#
+#   feature              failed    cleared
+#   has_pdb_ref            0.1%      49.5%   a PDB reference means it was deposited
+#   n_trials (mean)         4.09      16.44   more attempts means it kept going
+#   final_conc_mg_ml       19.1%      10.2%   a concentration means it was purified
+#   method = 'xray'    mean max_stage 6.68 vs 1.40 for 'none': derived from the status
+#                          history, so it encodes how far the target got
+#
+# Trained on everything, LightGBM scored a mean AUROC of 0.985 across the gates and
+# exactly 1.0000 on both the terminal outcome and gate 4. That is the "meaningless 0.9
+# AUC" the specification warns about, arriving through features rather than through the
+# split. The split was clean; the columns were not.
+
+prediction_time:
+  # Everything here is knowable from a FASTA, a database lookup and a choice of protocol.
+  sequence:
+    - seq_len
+    - pi
+    - gravy
+    - net_charge_ph7
+    - aromatic_frac
+    - cys_frac
+    - met_frac
+    - gly_frac
+    - pro_frac
+    - cys_count
+    - met_count
+    - tm_helices
+    - signal_peptide
+    - disorder_frac
+    - disorder_nterm
+    - disorder_cterm
+    - disorder_internal
+    - low_complexity_frac
+  taxonomy:
+    - superkingdom
+    - kingdom
+    - phylum
+  target_definition:
+    # Annotations attached to the target when it was selected, not results.
+    - n_sequences
+    - n_references
+    - has_pfam
+    - has_uniprot
+    - archive_says_membrane
+    - archive_says_eukaryotic
+    - archive_says_multidomain
+  pipeline_choice:
+    # `centre` is deliberately an input so the model conditions on pipeline differences
+    # openly instead of absorbing them, which is also what makes leave-one-centre-out
+    # interpretable. It is knowable before starting: you know whose lab you are in.
+    - centre
+  archive_context:
+    # Precedent a scientist could look up before starting. Computed over the TRAINING
+    # split only, with the target's own contribution subtracted back out.
+    #
+    # Structurally absent under the cluster-held-out split: whole clusters are held out,
+    # so 0.0% of cluster-test targets have a precedent against 91.9% of cluster-train.
+    # Under the temporal split 82.3% of test targets do, because a 2014 target can have
+    # pre-2014 precedents in its own cluster. The temporal split is therefore the one
+    # where these features are both available and honest.
+    - n_cluster_precedents
+    - n_close_precedents
+    - closest_identity_band
+    - cluster_censored_frac
+    - cluster_deposit_rate
+    - n_precedents
+    - n_precedents_cleared
+    - cluster_base_rate
+
+declared_protocol:
+  # Host, tag and protease are levers a scientist genuinely chooses up front, and they are
+  # exactly the counterfactuals the app offers ("what if I switch to Arctic Express?").
+  # But in the ARCHIVE they are mined from the protocol a trial actually referenced, so
+  # their mere PRESENCE tracks progression:
+  #
+  #   gate 0, host is null:  96.2% of failures, 27.3% of successes
+  #   gate 1, host is null:  41.9% of failures, 18.3% of successes
+  #
+  # A target that died at `selected` never had an expression protocol attached, so
+  # including these unconditionally lets the model read "this attempt got far enough to
+  # have a protocol" and call it a prediction.
+  #
+  # They are therefore excluded from the headline metrics and evaluated in a separate
+  # configuration RESTRICTED to rows that already have a declared protocol, where
+  # presence is constant and only the choice itself varies. That is the honest way to
+  # measure a counterfactual lever.
+  levers:
+    - host
+    - tag
+    - protease
+    - codon_optimised
+    - autoinduction
+
+post_hoc:
+  # NEVER a model input. Kept in the tables for the app's retrospective views, for the
+  # precedent narrative, and for describing what a comparable attempt actually did.
+  outcome_markers:
+    - has_pdb_ref          # a deposition reference: the answer itself
+    - method               # derived from the status history: encodes the stage reached
+    - n_trials             # 16.4 for cleared against 4.1 for failed
+    - n_trials_with_gene
+    - any_step_failed      # literally whether a step failed
+  measured_during_the_attempt:
+    - expression_pct       # the measured expression level
+    - solubility_pct       # the measured solubility
+    - final_conc_mg_ml     # a yield: only exists if it was purified
+    - max_trial_seq_len
+    - min_trial_seq_len
+    - construct_start      # the boundaries actually used, not the ones you would choose
+    - construct_end
+    - target_construct_type
+    - construct_type
+  implied_by_what_was_needed:
+    # Not per-target outcomes, but they signal what the attempt turned out to require.
+    - selenomethionine     # SeMet labelling is done for phasing, so the target crystallised
+    - refolding            # implies inclusion bodies were found
+    - detergent            # implies membrane solubilisation was attempted

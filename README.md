@@ -2,7 +2,7 @@
 
 > **Fine-tuned Attrition Forecasting From Archives: know where your protein is likely to die before you order the gene.**
 
-![python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white) ![lxml](https://img.shields.io/badge/lxml-6.1-467FF7) ![pyarrow](https://img.shields.io/badge/pyarrow-25.0-467FF7) ![duckdb](https://img.shields.io/badge/duckdb-1.5-FFF000?logo=duckdb&logoColor=black) ![pandas](https://img.shields.io/badge/pandas-3.0-150458?logo=pandas&logoColor=white) ![mmseqs2](https://img.shields.io/badge/MMseqs2-18-00897B) ![targets](https://img.shields.io/badge/targets-335%2C771-467FF7) ![status events](https://img.shields.io/badge/status%20events-3.78M-467FF7) ![clusters](https://img.shields.io/badge/clusters%20(30%25%20id)-88%2C452-467FF7) ![tests](https://img.shields.io/badge/pytest-100%20passing-00897B) ![data](https://img.shields.io/badge/data-PSI%20TargetTrack%20%C2%B7%20CC--BY--SA--4.0-9b51e0) ![phase 1](https://img.shields.io/badge/phase%201-complete-fcb900) ![censored](https://img.shields.io/badge/censored-19.03%25-9b51e0) ![phase 2](https://img.shields.io/badge/phase%202-complete-fcb900) [![MLX-LM](https://img.shields.io/badge/MLX--LM-Apple%20Silicon-000000?logo=apple&logoColor=white)](https://github.com/ml-explore/mlx-lm) ![author](https://img.shields.io/badge/author-Marc%20C.%20Deller%2C%20D.Phil.-1C244B)
+![python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white) ![lxml](https://img.shields.io/badge/lxml-6.1-467FF7) ![pyarrow](https://img.shields.io/badge/pyarrow-25.0-467FF7) ![duckdb](https://img.shields.io/badge/duckdb-1.5-FFF000?logo=duckdb&logoColor=black) ![pandas](https://img.shields.io/badge/pandas-3.0-150458?logo=pandas&logoColor=white) ![mmseqs2](https://img.shields.io/badge/MMseqs2-18-00897B) ![targets](https://img.shields.io/badge/targets-335%2C771-467FF7) ![status events](https://img.shields.io/badge/status%20events-3.78M-467FF7) ![clusters](https://img.shields.io/badge/clusters%20(30%25%20id)-88%2C452-467FF7) ![tests](https://img.shields.io/badge/pytest-116%20passing-00897B) ![data](https://img.shields.io/badge/data-PSI%20TargetTrack%20%C2%B7%20CC--BY--SA--4.0-9b51e0) ![phase 1](https://img.shields.io/badge/phase%201-complete-fcb900) ![censored](https://img.shields.io/badge/censored-19.03%25-9b51e0) ![phase 2](https://img.shields.io/badge/phase%202-complete-fcb900) ![lightgbm](https://img.shields.io/badge/LightGBM-4.7-00897B) [![MLX-LM](https://img.shields.io/badge/MLX--LM-Apple%20Silicon-000000?logo=apple&logoColor=white)](https://github.com/ml-explore/mlx-lm) ![author](https://img.shields.io/badge/author-Marc%20C.%20Deller%2C%20D.Phil.-1C244B)
 
 <table>
 <tr>
@@ -224,6 +224,41 @@ Two things worth stating. The **archive-context features are computed over the t
 
 Host and tag come from mining the 1,501 shared protocol documents that 95.5% of trials point at, which is why a few hundred kilobytes of free text annotates half the archive.
 
+## 📉 The baseline, and the leak it caught
+
+`baseline/gbm_baseline.py`. The specification calls this non-negotiable and it earned that immediately: the first run scored a **mean AUROC of 0.985 across the gates and exactly 1.0000 on the terminal outcome**, on a clean cluster-held-out split. That is the meaningless result the specification warns about, and it arrived through the feature columns rather than through the split.
+
+Three columns were the answer in disguise. A PDB reference is present for 49.5% of targets that cleared crystallisation and 0.1% of those that did not, because a deposition reference means it was deposited. The `method` field is derived from the status history, so `xray` carries a mean maximum stage of 6.68 against 1.40 for `none`. Successful targets average 16.4 trials against 4.1. `config/features.yaml` now separates what a scientist knows **before ordering the gene** from what was recorded **while the attempt ran**, and a test reads the boundary back off the saved boosters.
+
+A subtler one: host, tag and protease are mined from the protocol a trial referenced, so their **presence** tracks progression. At the first gate, host is missing for 96.2% of failures and 27.3% of successes, because a target that died at selection never had an expression protocol attached. They are excluded from the headline and evaluated separately on rows that all declare a protocol, where only the choice varies.
+
+**Cluster-held-out, 37 prediction-time features:**
+
+| Gate | Transition | n | Base rate | AUROC | Brier | ECE |
+|---|---|---|---|---|---|---|
+| 0 | selected → cloned | 30,890 | 0.763 | 0.883 | 0.110 | 0.028 |
+| 1 | cloned → expressed | 22,062 | 0.570 | 0.770 | 0.194 | 0.040 |
+| 2 | expressed → soluble | 12,112 | 0.639 | 0.869 | 0.141 | 0.023 |
+| 3 | soluble → purified | 7,130 | 0.751 | 0.841 | 0.138 | 0.030 |
+| 4 | purified → crystallised | 5,005 | 0.344 | 0.762 | 0.179 | 0.015 |
+| 5 | crystallised → diffracting | 1,639 | 0.798 | 0.826 | 0.126 | 0.025 |
+| 6 | diffracting → structure | 1,294 | 0.701 | 0.853 | 0.139 | 0.041 |
+| 7 | structure → deposited | 901 | 0.981 | 0.906 | 0.016 | 0.012 |
+| | terminal (deposited) | 30,890 | 0.029 | 0.866 | 0.024 | 0.007 |
+
+**All four configurations:**
+
+| Configuration | Features | Mean AUROC | Terminal AUROC |
+|---|---|---|---|
+| Cluster-held-out (headline) | 37 | 0.839 | 0.866 |
+| Temporal, train pre-2014 | 37 | 0.740 | 0.849 |
+| Declared protocol, restricted | 42 | 0.851 | 0.903 |
+| Post-hoc added back (negative control) | 59 | 0.985 | 1.000 |
+
+The last row is kept as a **negative control** and asserted by a test, because a check that has only ever passed is not a check. The gap between the first row and the last is what the post-hoc block gives away.
+
+Archive-context features deserve one caveat. Under the cluster split they are structurally absent at test time: whole clusters are held out, so 0.0% of test targets have a precedent against 91.9% of training targets. The temporal split is the one where precedent is both available (82.3% of test targets) and honest, since a 2014 target may have pre-2014 precedents in its own cluster.
+
 ## 🎓 Roadmap and the science
 
 The full plan is in `PROJECT_PLAN.md` and the specification in `faffabout_build_spec_v1.md`. The parts that matter most:
@@ -248,7 +283,8 @@ The full plan is in `PROJECT_PLAN.md` and the specification in `faffabout_build_
 - [ ] **Phase 2: ESM-2 features.** Disorder and embeddings on ZeroGPU, cached by `seq_md5`, to replace the local FoldIndex proxy
 - [x] **Phase 2: splits.** `scripts/splits.py`: cluster-held-out at exactly 80/10/10 with zero cluster and zero sequence leakage, leave-one-centre-out across five centres, and a temporal split that excludes the 7,846 targets straddling the 2014 boundary
 - [x] **Phase 2: SFT corpus.** `scripts/07_build_sft.py`: 120,000 training records in the specification's five-task mix, 2,000 each for validation and test drawn from held-out clusters, 10 paraphrases per template, sorted by token length for MLX padding
-- [ ] **Phase 3: GBM baseline.** LightGBM on the same features; the number the LLM must add over it
+- [x] **Phase 3: GBM baseline.** `baseline/gbm_baseline.py`: LightGBM per gate and on the terminal outcome, across the cluster, temporal and declared-protocol configurations, with a leak demonstration as a negative control. Mean AUROC 0.839 cluster-held-out, terminal 0.866
+- [x] **Phase 3: feature provenance.** `config/features.yaml` separates prediction-time from post-hoc features, after the first baseline scored a meaningless 0.985
 - [ ] **Phase 3: disk and licence.** The model pipeline needs roughly 40 GB and 17 GB is free; Llama 3.1 is a gated repository needing the Meta community licence accepted
 - [ ] **Phase 3: LoRA.** Llama-3.1-8B-Instruct 8-bit, all 32 layers, rank 16, `mask_prompt`, W&B; optional DPO on L3 pairs; fuse with `--de-quantize`
 - [ ] **Phase 3: eval.** Brier, 10-bin ECE, per-gate AUROC, bottleneck top-1, GBM delta on all three splits; 40 graded narratives with zero hallucinated ids

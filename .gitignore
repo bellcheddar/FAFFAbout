@@ -43,3 +43,6 @@ faffabout-*.txt
 # Run logs and reports (the acceptance result is recorded in README.md)
 data/*.log
 data/acceptance.txt
+
+# Baseline model artefacts (regenerate with baseline/gbm_baseline.py)
+baseline/models/

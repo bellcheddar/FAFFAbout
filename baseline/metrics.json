@@ -1,0 +1,350 @@
+{
+  "cluster": {
+    "split": "cluster",
+    "n_features": 37,
+    "n_rows": 842681,
+    "gates": {
+      "0": {
+        "gate_name": "selected -> cloned",
+        "best_iteration": 554,
+        "n": 30890,
+        "positive_rate": 0.7634509550016186,
+        "brier": 0.11025415763606261,
+        "ece": 0.028127427280662372,
+        "auroc": 0.8834021784033368
+      },
+      "1": {
+        "gate_name": "cloned -> expressed",
+        "best_iteration": 437,
+        "n": 22062,
+        "positive_rate": 0.5698032816607742,
+        "brier": 0.19378682384205673,
+        "ece": 0.04041566348799524,
+        "auroc": 0.7698456980974343
+      },
+      "2": {
+        "gate_name": "expressed -> soluble",
+        "best_iteration": 405,
+        "n": 12112,
+        "positive_rate": 0.6385402906208718,
+        "brier": 0.14080989362079993,
+        "ece": 0.022566812825602835,
+        "auroc": 0.8693427465984978
+      },
+      "3": {
+        "gate_name": "soluble -> purified",
+        "best_iteration": 290,
+        "n": 7130,
+        "positive_rate": 0.7514726507713885,
+        "brier": 0.13796507087376236,
+        "ece": 0.030062275011472284,
+        "auroc": 0.8413265389952957
+      },
+      "4": {
+        "gate_name": "purified -> crystallised",
+        "best_iteration": 124,
+        "n": 5005,
+        "positive_rate": 0.34445554445554444,
+        "brier": 0.17907832348488958,
+        "ece": 0.014705739573476085,
+        "auroc": 0.7621752288186713
+      },
+      "5": {
+        "gate_name": "crystallised -> diffracting",
+        "best_iteration": 106,
+        "n": 1639,
+        "positive_rate": 0.7980475899938987,
+        "brier": 0.12585537609282982,
+        "ece": 0.024723406427783205,
+        "auroc": 0.8262343283719984
+      },
+      "6": {
+        "gate_name": "diffracting -> structure",
+        "best_iteration": 87,
+        "n": 1294,
+        "positive_rate": 0.7009273570324575,
+        "brier": 0.1392886049290289,
+        "ece": 0.04090129812933953,
+        "auroc": 0.8534966339894419
+      },
+      "7": {
+        "gate_name": "structure -> deposited",
+        "best_iteration": 53,
+        "n": 901,
+        "positive_rate": 0.9811320754716981,
+        "brier": 0.01623674971647786,
+        "ece": 0.01198030544156628,
+        "auroc": 0.9059422411498534
+      }
+    },
+    "terminal": {
+      "best_iteration": 155,
+      "n": 30890,
+      "positive_rate": 0.02861767562317902,
+      "brier": 0.023869876748924632,
+      "ece": 0.007479395196128113,
+      "auroc": 0.8659859091530111
+    }
+  },
+  "temporal": {
+    "split": "temporal",
+    "n_features": 37,
+    "n_rows": 842681,
+    "gates": {
+      "0": {
+        "gate_name": "selected -> cloned",
+        "best_iteration": 600,
+        "n": 9391,
+        "positive_rate": 0.700564370141625,
+        "brier": 0.1765277013972845,
+        "ece": 0.07168446713757996,
+        "auroc": 0.7616430960444209
+      },
+      "1": {
+        "gate_name": "cloned -> expressed",
+        "best_iteration": 600,
+        "n": 5239,
+        "positive_rate": 0.6913533117007062,
+        "brier": 0.18563535753543328,
+        "ece": 0.07487766815014416,
+        "auroc": 0.7388956787473788
+      },
+      "2": {
+        "gate_name": "expressed -> soluble",
+        "best_iteration": 600,
+        "n": 3619,
+        "positive_rate": 0.9953025697706549,
+        "brier": 0.019898097921791577,
+        "ece": 0.04522705069686231,
+        "auroc": 0.9053140412189306
+      },
+      "3": {
+        "gate_name": "soluble -> purified",
+        "best_iteration": 600,
+        "n": 2884,
+        "positive_rate": 0.6463245492371706,
+        "brier": 0.21611672961140788,
+        "ece": 0.05508105608590651,
+        "auroc": 0.6606007531768072
+      },
+      "4": {
+        "gate_name": "purified -> crystallised",
+        "best_iteration": 600,
+        "n": 1278,
+        "positive_rate": 0.35837245696400627,
+        "brier": 0.20681675117212006,
+        "ece": 0.06753852122031481,
+        "auroc": 0.695252423048248
+      },
+      "5": {
+        "gate_name": "crystallised -> diffracting",
+        "best_iteration": 600,
+        "n": 409,
+        "positive_rate": 0.8777506112469438,
+        "brier": 0.20300176570543846,
+        "ece": 0.26784853352329574,
+        "auroc": 0.6047353760445682
+      },
+      "6": {
+        "gate_name": "diffracting -> structure",
+        "best_iteration": 600,
+        "n": 343,
+        "positive_rate": 0.7084548104956269,
+        "brier": 0.16487544020069883,
+        "ece": 0.10881931093356845,
+        "auroc": 0.816954732510288
+      },
+      "7": {
+        "gate_name": "structure -> deposited",
+        "best_iteration": 600,
+        "n": 238,
+        "positive_rate": 0.9747899159663865,
+        "brier": 0.024839385945887554,
+        "ece": 0.02355698695954023,
+        "auroc": 0.7399425287356322
+      }
+    },
+    "terminal": {
+      "best_iteration": 600,
+      "n": 9391,
+      "positive_rate": 0.02470450431263976,
+      "brier": 0.022782208296795434,
+      "ece": 0.005098377351192656,
+      "auroc": 0.8485586063830187
+    }
+  },
+  "declared_protocol": {
+    "split": "cluster, rows with a declared protocol, host/tag/protease as inputs",
+    "n_features": 42,
+    "n_rows": 579817,
+    "gates": {
+      "0": {
+        "gate_name": "selected -> cloned",
+        "best_iteration": 237,
+        "n": 15786,
+        "positive_rate": 0.9890409223362473,
+        "brier": 0.009161056313019268,
+        "ece": 0.0048252022134547615,
+        "auroc": 0.969194190849555
+      },
+      "1": {
+        "gate_name": "cloned -> expressed",
+        "best_iteration": 321,
+        "n": 14750,
+        "positive_rate": 0.664271186440678,
+        "brier": 0.14078819080655255,
+        "ece": 0.033265529335360776,
+        "auroc": 0.8672241680986623
+      },
+      "2": {
+        "gate_name": "expressed -> soluble",
+        "best_iteration": 328,
+        "n": 9476,
+        "positive_rate": 0.6226255804136767,
+        "brier": 0.09597360698020073,
+        "ece": 0.01540654906932182,
+        "auroc": 0.9404838755545445
+      },
+      "3": {
+        "gate_name": "soluble -> purified",
+        "best_iteration": 99,
+        "n": 5363,
+        "positive_rate": 0.7926533656535522,
+        "brier": 0.08073308067363023,
+        "ece": 0.035974100251727495,
+        "auroc": 0.9404587832909397
+      },
+      "4": {
+        "gate_name": "purified -> crystallised",
+        "best_iteration": 129,
+        "n": 3963,
+        "positive_rate": 0.31491294473883424,
+        "brier": 0.17515294548156016,
+        "ece": 0.010907406878363337,
+        "auroc": 0.7440235869103271
+      },
+      "5": {
+        "gate_name": "crystallised -> diffracting",
+        "best_iteration": 141,
+        "n": 1174,
+        "positive_rate": 0.8160136286201022,
+        "brier": 0.11781894097872232,
+        "ece": 0.03111309377142945,
+        "auroc": 0.8344665777468492
+      },
+      "6": {
+        "gate_name": "diffracting -> structure",
+        "best_iteration": 137,
+        "n": 950,
+        "positive_rate": 0.6536842105263158,
+        "brier": 0.15284418826905907,
+        "ece": 0.05521196313103126,
+        "auroc": 0.8372269454600629
+      },
+      "7": {
+        "gate_name": "structure -> deposited",
+        "best_iteration": 59,
+        "n": 620,
+        "positive_rate": 0.9919354838709677,
+        "brier": 0.008281551272075062,
+        "ece": 0.0028831142906565565,
+        "auroc": 0.6783739837398375
+      }
+    },
+    "terminal": {
+      "best_iteration": 83,
+      "n": 15786,
+      "positive_rate": 0.03895857088559483,
+      "brier": 0.03209217333160266,
+      "ece": 0.012485678393301546,
+      "auroc": 0.9025111024295925
+    }
+  },
+  "cluster_with_post_hoc": {
+    "split": "cluster + POST-HOC (leak demonstration)",
+    "n_features": 59,
+    "n_rows": 842681,
+    "gates": {
+      "0": {
+        "gate_name": "selected -> cloned",
+        "best_iteration": 334,
+        "n": 30890,
+        "positive_rate": 0.7634509550016186,
+        "brier": 0.040214363648964475,
+        "ece": 0.006905625863112487,
+        "auroc": 0.9854880642769784
+      },
+      "1": {
+        "gate_name": "cloned -> expressed",
+        "best_iteration": 425,
+        "n": 22062,
+        "positive_rate": 0.5698032816607742,
+        "brier": 0.08953242829933988,
+        "ece": 0.024032682983791975,
+        "auroc": 0.9518917775148001
+      },
+      "2": {
+        "gate_name": "expressed -> soluble",
+        "best_iteration": 435,
+        "n": 12112,
+        "positive_rate": 0.6385402906208718,
+        "brier": 0.06680038361618297,
+        "ece": 0.010621644900353633,
+        "auroc": 0.9696310353752919
+      },
+      "3": {
+        "gate_name": "soluble -> purified",
+        "best_iteration": 234,
+        "n": 7130,
+        "positive_rate": 0.7514726507713885,
+        "brier": 0.03080066283099553,
+        "ece": 0.013171776723384179,
+        "auroc": 0.9919838860394827
+      },
+      "4": {
+        "gate_name": "purified -> crystallised",
+        "best_iteration": 257,
+        "n": 5005,
+        "positive_rate": 0.34445554445554444,
+        "brier": 4.723232897661337e-06,
+        "ece": 9.288084486877348e-05,
+        "auroc": 1.0
+      },
+      "5": {
+        "gate_name": "crystallised -> diffracting",
+        "best_iteration": 123,
+        "n": 1639,
+        "positive_rate": 0.7980475899938987,
+        "brier": 0.0410187410719806,
+        "ece": 0.012702635111641143,
+        "auroc": 0.9824655616840823
+      },
+      "6": {
+        "gate_name": "diffracting -> structure",
+        "best_iteration": 158,
+        "n": 1294,
+        "positive_rate": 0.7009273570324575,
+        "brier": 0.011722986387171582,
+        "ece": 0.006377994719340154,
+        "auroc": 0.9976781222133905
+      },
+      "7": {
+        "gate_name": "structure -> deposited",
+        "best_iteration": 107,
+        "n": 901,
+        "positive_rate": 0.9811320754716981,
+        "brier": 0.0038235220847951173,
+        "ece": 0.005640467797038466,
+        "auroc": 0.9988022358264573
+      }
+    },
+    "terminal": {
+      "best_iteration": 167,
+      "n": 30890,
+      "positive_rate": 0.02861767562317902,
+      "brier": 0.00022905191639969801,
+      "ece": 0.00026202230209451444,
+      "auroc": 0.9999954006182172
+    }
+  }
+}
