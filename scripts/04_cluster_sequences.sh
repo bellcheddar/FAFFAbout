@@ -12,35 +12,43 @@
 #         data/clusters/tt30_all_seqs.fasta
 #         data/clusters/tt30_clusters.parquet  (seq_md5, cluster_id, cluster_size)
 #
-# Usage: bash scripts/04_cluster_sequences.sh [--threads N]
+# Run it twice: 30% identity defines every split, 70% identity defines the hard-negative
+# pairs of Phase 2 (a same-cluster pair with divergent fate is worth ~50 random negatives).
+#
+# Usage: bash scripts/04_cluster_sequences.sh [--threads N] [--min-seq-id 0.30|0.70]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FASTA="$ROOT/data/parquet/targets.fasta"
 OUT="$ROOT/data/clusters"
-TMP="$OUT/tmp"
-PREFIX="$OUT/tt30"
 THREADS="${THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc)}"
+MIN_SEQ_ID="0.30"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --threads) THREADS="$2"; shift 2 ;;
+    --min-seq-id) MIN_SEQ_ID="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# tt30 for splits (30% identity), tt70 for hard-negative pairs (70% identity)
+TAG="tt$(printf '%.0f' "$(echo "$MIN_SEQ_ID * 100" | bc -l)")"
+PREFIX="$OUT/$TAG"
+TMP="$OUT/tmp_$TAG"
 
 command -v mmseqs >/dev/null || { echo "mmseqs not on PATH (brew install mmseqs2)" >&2; exit 1; }
 [[ -s "$FASTA" ]] || { echo "missing $FASTA: run scripts/02_parse_tt_xml.py first" >&2; exit 1; }
 
 mkdir -p "$OUT" "$TMP"
-echo "mmseqs $(mmseqs version)  threads=$THREADS"
+echo "mmseqs $(mmseqs version)  threads=$THREADS  min-seq-id=$MIN_SEQ_ID  tag=$TAG"
 echo "input : $FASTA ($(grep -c '^>' "$FASTA") sequences)"
 
-# --min-seq-id 0.30  : 30% identity threshold (spec section 4.4)
+# --min-seq-id       : 0.30 for splits (spec section 4.4), 0.70 for hard-negative pairs
 # -c 0.8 --cov-mode 1: 80% coverage of the shorter (target) sequence, so fragments and
 #                      domain constructs of the same protein cluster with the full length
 mmseqs easy-cluster "$FASTA" "$PREFIX" "$TMP" \
-  --min-seq-id 0.30 -c 0.8 --cov-mode 1 \
+  --min-seq-id "$MIN_SEQ_ID" -c 0.8 --cov-mode 1 \
   --threads "$THREADS" -v 1
 
 rm -rf "$TMP"

@@ -2,7 +2,7 @@
 
 > **Fine-tuned Attrition Forecasting From Archives: know where your protein is likely to die before you order the gene.**
 
-![python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white) ![lxml](https://img.shields.io/badge/lxml-6.1-467FF7) ![pyarrow](https://img.shields.io/badge/pyarrow-25.0-467FF7) ![duckdb](https://img.shields.io/badge/duckdb-1.5-FFF000?logo=duckdb&logoColor=black) ![pandas](https://img.shields.io/badge/pandas-3.0-150458?logo=pandas&logoColor=white) ![mmseqs2](https://img.shields.io/badge/MMseqs2-18-00897B) ![targets](https://img.shields.io/badge/targets-335%2C771-467FF7) ![status events](https://img.shields.io/badge/status%20events-3.78M-467FF7) ![clusters](https://img.shields.io/badge/clusters%20(30%25%20id)-88%2C452-467FF7) ![tests](https://img.shields.io/badge/pytest-38%20passing-00897B) ![data](https://img.shields.io/badge/data-PSI%20TargetTrack%20%C2%B7%20CC--BY--SA--4.0-9b51e0) ![phase 1](https://img.shields.io/badge/phase%201-complete-fcb900) ![censored](https://img.shields.io/badge/censored-19.03%25-9b51e0) ![phase 2](https://img.shields.io/badge/phase%202-in%20progress-fcb900) [![MLX-LM](https://img.shields.io/badge/MLX--LM-Apple%20Silicon-000000?logo=apple&logoColor=white)](https://github.com/ml-explore/mlx-lm) ![author](https://img.shields.io/badge/author-Marc%20C.%20Deller%2C%20D.Phil.-1C244B)
+![python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white) ![lxml](https://img.shields.io/badge/lxml-6.1-467FF7) ![pyarrow](https://img.shields.io/badge/pyarrow-25.0-467FF7) ![duckdb](https://img.shields.io/badge/duckdb-1.5-FFF000?logo=duckdb&logoColor=black) ![pandas](https://img.shields.io/badge/pandas-3.0-150458?logo=pandas&logoColor=white) ![mmseqs2](https://img.shields.io/badge/MMseqs2-18-00897B) ![targets](https://img.shields.io/badge/targets-335%2C771-467FF7) ![status events](https://img.shields.io/badge/status%20events-3.78M-467FF7) ![clusters](https://img.shields.io/badge/clusters%20(30%25%20id)-88%2C452-467FF7) ![tests](https://img.shields.io/badge/pytest-53%20passing-00897B) ![data](https://img.shields.io/badge/data-PSI%20TargetTrack%20%C2%B7%20CC--BY--SA--4.0-9b51e0) ![phase 1](https://img.shields.io/badge/phase%201-complete-fcb900) ![censored](https://img.shields.io/badge/censored-19.03%25-9b51e0) ![phase 2](https://img.shields.io/badge/phase%202-in%20progress-fcb900) [![MLX-LM](https://img.shields.io/badge/MLX--LM-Apple%20Silicon-000000?logo=apple&logoColor=white)](https://github.com/ml-explore/mlx-lm) ![author](https://img.shields.io/badge/author-Marc%20C.%20Deller%2C%20D.Phil.-1C244B)
 
 <table>
 <tr>
@@ -54,6 +54,7 @@ brew install mmseqs2
 | 5. Query layer | `.venv/bin/python scripts/build_duckdb.py` | `data/faffabout.duckdb` (views) plus the acceptance report | seconds |
 | Optional | `.venv/bin/python scripts/fetch_pdb_metadata.py` | fills `outcomes.resolution` from RCSB | 2 min |
 | 6. Censoring | `.venv/bin/python scripts/censoring.py` | `data/parquet/censoring/` plus the censoring report | seconds |
+| 7. Labels | `.venv/bin/python scripts/06_build_labels.py` | `data/parquet/labels_{l1,l2,l3}/` plus the label report | seconds |
 
 Flags:
 
@@ -79,6 +80,9 @@ All tables live in `data/parquet/` and are exposed as DuckDB views of the same n
 | `status_history` | one row per status event | 3,783,070 | `target_id`, `trial_id`, `history_id`, `status_raw`, `status_date`, `step_duration_days` |
 | `status_history_canon` | `status_history` joined to the canonical map | 3,783,070 | adds `status_canon`, `stage_ord`, `method`, `terminal` |
 | `trials` | one row per experimental attempt | 961,548 | `target_id`, `trial_id`, `status_raw`, `stop_status`, `protocol_refs`, `protocol_types`, `sequence` (protein), `sequence_dna`, `construct_type`, `free_text_notes` |
+| `labels_l1` | one row per (target, gate entered) | 906,573 | `gate`, `gate_name`, `label`, `in_loss`, `censored`, `max_stage` |
+| `labels_l2` | one row per uncensored target | 271,619 | `outcome`, `deposited`, `max_stage` |
+| `labels_l3` | one row per preference pair | 172,695 | `chosen_id`, `rejected_id`, `stage_gap`, `hard`, `cross_centre` |
 | `censoring` | one row per target | 335,771 | `censored`, `censored_reason`, `censored_centre_winddown`, `censored_bulk_closure`, `last_any`, `wind_down`, `on_bulk_closure_date` |
 | `protocols` | one row per protocol (free text) | 1,501 | `protocol_id`, `centre`, `protocol_type`, `text` |
 | `outcomes` | one row per PDB deposition | 11,954 | `target_id`, `pdb_id`, `method`, `resolution`, `deposit_date`, `source` |
@@ -179,6 +183,27 @@ Thirteen bulk-closure dates are detected across seven centres. The rule is valid
 
 The per-centre picture is the reason none of this can be skipped. JCSG censors at 0% (it never used the `work stopped` marker and stayed active until 2016), NESG at 58.5%, CESG at 47.6%. A model trained without this correction would learn the funding history of US structural genomics, and it would learn it very well.
 
+## 🎯 The label sets
+
+`scripts/06_build_labels.py`. A gate is the transition **out of** a stage, so the nine-rung ladder has eight of them and stage 8 is terminal.
+
+| Gate | Transition | Rows | Cleared | Failed | Censored | Cleared, of those in the loss |
+|---|---|---|---|---|---|---|
+| 0 | selected → cloned | 335,670 | 234,481 | 71,004 | 30,185 | 76.8% |
+| 1 | cloned → expressed | 234,481 | 137,468 | 83,200 | 13,813 | 62.3% |
+| 2 | expressed → soluble | 137,468 | 89,731 | 41,443 | 6,294 | 68.4% |
+| 3 | soluble → purified | 89,731 | 62,568 | 20,083 | 7,080 | 75.7% |
+| 4 | purified → crystallised | 62,568 | 20,913 | 36,805 | 4,850 | **36.2%** |
+| 5 | crystallised → diffracting | 20,913 | 14,846 | 4,611 | 1,456 | 76.3% |
+| 6 | diffracting → structure | 14,846 | 10,896 | 3,814 | 136 | 74.1% |
+| 7 | structure → deposited | 10,896 | 10,500 | 318 | 78 | 97.1% |
+
+906,573 rows, of which 842,681 enter the loss and 63,892 are held out as censored: exactly one per censored target, since a censored target still passed every gate below its last. The gradient is the one a crystallographer would predict. Getting a purified protein to crystallise is the wall at 36.2%, and once a structure exists depositing it is near-automatic at 97.1%.
+
+**L2** is one row per uncensored target, `deposited` or `stalled_at_{g}`, for Brier score and expected calibration error: 271,619 rows at a 3.86% positive rate, against the specification's expected 4%.
+
+**L3** is 172,695 within-cluster preference pairs, uncensored, differing by more than one gate. 72,505 are **hard** (the two proteins also share a 70%-identity cluster) and 37,760 of those are same-centre, which is the most valuable stratum in the corpus: the same lab, a near-identical protein, a different fate, so the difference is the construct or the host rather than the pipeline. The per-cluster cap keeps hard pairs first rather than an arbitrary slice.
+
 ## 🎓 Roadmap and the science
 
 The full plan is in `PROJECT_PLAN.md` and the specification in `faffabout_build_spec_v1.md`. The parts that matter most:
@@ -198,7 +223,7 @@ The full plan is in `PROJECT_PLAN.md` and the specification in `faffabout_build_
 - [x] **Phase 1: query layer and acceptance.** `build_duckdb.py` attaches DuckDB views over the Parquet directory and prints the acceptance report
 - [x] **Phase 1: PDB resolution.** `fetch_pdb_metadata.py` fills `outcomes.resolution` from RCSB: 11,607 of 11,802 distinct ids resolve (the rest are obsolete), 9,440 carry a resolution
 - [x] **Phase 2: censoring.** Two rules in `scripts/censoring.py`, both stored separately and configurable in `config/labels.yaml`: the specification's per-centre wind-down (99.5th-percentile last activity, 180-day window, plus the global freeze) and a new bulk-closure detector. 19.03% of the archive is censored, inside the 12 to 22% gate
-- [ ] **Phase 2: labels.** L1 gate transitions, L2 terminal outcomes, L3 preference pairs, with the four negative-mining rules in code
+- [x] **Phase 2: labels.** `scripts/06_build_labels.py` builds L1 (906,573 gate transitions over eight gates, 842,681 in loss), L2 (271,619 uncensored terminal outcomes, 3.86% deposited) and L3 (172,695 within-cluster preference pairs, 72,505 of them hard at >70% identity)
 - [ ] **Phase 2: features.** Composition, topology, annotation, construct and archive-context features; ESM-2 disorder on ZeroGPU cached by `seq_md5`; never the raw sequence in a prompt
 - [ ] **Phase 2: splits and SFT.** Cluster, centre and temporal splits; five-task chat JSONL with 8 to 12 paraphrases per template, sorted by token length
 - [ ] **Phase 3: GBM baseline.** LightGBM on the same features; the number the LLM must add over it

@@ -46,3 +46,11 @@ censoring:
   acceptance:
     min_pct: 12.0
     max_pct: 22.0
+
+# --- L3 preference pairs ---------------------------------------------------------------
+l3:
+  # Within a 30% cluster, pair uncensored targets whose fates differ by more than one gate.
+  # Capped per cluster so a large family cannot dominate the mix; the cap keeps the hardest
+  # pairs (same 70% cluster) and then the widest fate gaps, rather than an arbitrary slice.
+  max_pairs_per_cluster: 20
+  min_stage_gap: 2      # enforced as max_stage(A) > max_stage(B) + 1
