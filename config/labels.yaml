@@ -54,3 +54,17 @@ l3:
   # pairs (same 70% cluster) and then the widest fate gaps, rather than an arbitrary slice.
   max_pairs_per_cluster: 20
   min_stage_gap: 2      # enforced as max_stage(A) > max_stage(B) + 1
+
+# --- SFT corpus ------------------------------------------------------------------------
+sft:
+  # Spec section 5.6. Mixed multi-task so the model does not overfit one template.
+  mix:
+    gate_judgement: 0.45
+    pipeline_forecast: 0.20
+    orthologue_ranking: 0.15
+    construct_recommend: 0.12
+    failure_attribution: 0.08
+  # Negative-mining rules 3 and 4 (spec section 5.3).
+  hard_oversample: 3          # a >70% identity pair with divergent fate is worth ~50 random negatives
+  easy_negative_cap: 0.25     # easy negatives capped at 25% of the negative mass,
+                              # stratified on (TM helix count, kingdom, length decile)

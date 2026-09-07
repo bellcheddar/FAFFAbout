@@ -2,7 +2,7 @@
 
 > **Fine-tuned Attrition Forecasting From Archives: know where your protein is likely to die before you order the gene.**
 
-![python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white) ![lxml](https://img.shields.io/badge/lxml-6.1-467FF7) ![pyarrow](https://img.shields.io/badge/pyarrow-25.0-467FF7) ![duckdb](https://img.shields.io/badge/duckdb-1.5-FFF000?logo=duckdb&logoColor=black) ![pandas](https://img.shields.io/badge/pandas-3.0-150458?logo=pandas&logoColor=white) ![mmseqs2](https://img.shields.io/badge/MMseqs2-18-00897B) ![targets](https://img.shields.io/badge/targets-335%2C771-467FF7) ![status events](https://img.shields.io/badge/status%20events-3.78M-467FF7) ![clusters](https://img.shields.io/badge/clusters%20(30%25%20id)-88%2C452-467FF7) ![tests](https://img.shields.io/badge/pytest-53%20passing-00897B) ![data](https://img.shields.io/badge/data-PSI%20TargetTrack%20%C2%B7%20CC--BY--SA--4.0-9b51e0) ![phase 1](https://img.shields.io/badge/phase%201-complete-fcb900) ![censored](https://img.shields.io/badge/censored-19.03%25-9b51e0) ![phase 2](https://img.shields.io/badge/phase%202-in%20progress-fcb900) [![MLX-LM](https://img.shields.io/badge/MLX--LM-Apple%20Silicon-000000?logo=apple&logoColor=white)](https://github.com/ml-explore/mlx-lm) ![author](https://img.shields.io/badge/author-Marc%20C.%20Deller%2C%20D.Phil.-1C244B)
+![python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white) ![lxml](https://img.shields.io/badge/lxml-6.1-467FF7) ![pyarrow](https://img.shields.io/badge/pyarrow-25.0-467FF7) ![duckdb](https://img.shields.io/badge/duckdb-1.5-FFF000?logo=duckdb&logoColor=black) ![pandas](https://img.shields.io/badge/pandas-3.0-150458?logo=pandas&logoColor=white) ![mmseqs2](https://img.shields.io/badge/MMseqs2-18-00897B) ![targets](https://img.shields.io/badge/targets-335%2C771-467FF7) ![status events](https://img.shields.io/badge/status%20events-3.78M-467FF7) ![clusters](https://img.shields.io/badge/clusters%20(30%25%20id)-88%2C452-467FF7) ![tests](https://img.shields.io/badge/pytest-100%20passing-00897B) ![data](https://img.shields.io/badge/data-PSI%20TargetTrack%20%C2%B7%20CC--BY--SA--4.0-9b51e0) ![phase 1](https://img.shields.io/badge/phase%201-complete-fcb900) ![censored](https://img.shields.io/badge/censored-19.03%25-9b51e0) ![phase 2](https://img.shields.io/badge/phase%202-complete-fcb900) [![MLX-LM](https://img.shields.io/badge/MLX--LM-Apple%20Silicon-000000?logo=apple&logoColor=white)](https://github.com/ml-explore/mlx-lm) ![author](https://img.shields.io/badge/author-Marc%20C.%20Deller%2C%20D.Phil.-1C244B)
 
 <table>
 <tr>
@@ -55,6 +55,9 @@ brew install mmseqs2
 | Optional | `.venv/bin/python scripts/fetch_pdb_metadata.py` | fills `outcomes.resolution` from RCSB | 2 min |
 | 6. Censoring | `.venv/bin/python scripts/censoring.py` | `data/parquet/censoring/` plus the censoring report | seconds |
 | 7. Labels | `.venv/bin/python scripts/06_build_labels.py` | `data/parquet/labels_{l1,l2,l3}/` plus the label report | seconds |
+| 8. Splits | `.venv/bin/python scripts/splits.py` | `data/parquet/splits/` plus the leakage report | seconds |
+| 9. Features | `.venv/bin/python scripts/05_derive_features.py` | `data/parquet/features/` | 6 min |
+| 10. SFT corpus | `.venv/bin/python scripts/07_build_sft.py` | `data/sft/{train,valid,test}.jsonl` | 2 min |
 
 Flags:
 
@@ -204,6 +207,23 @@ The per-centre picture is the reason none of this can be skipped. JCSG censors a
 
 **L3** is 172,695 within-cluster preference pairs, uncensored, differing by more than one gate. 72,505 are **hard** (the two proteins also share a 70%-identity cluster) and 37,760 of those are same-centre, which is the most valuable stratum in the corpus: the same lab, a near-identical protein, a different fate, so the difference is the construct or the host rather than the pipeline. The per-cluster cap keeps hard pairs first rather than an arbitrary slice.
 
+## 🧬 Features
+
+`scripts/05_derive_features.py`, with the sequence functions isolated in `features_seq.py` and cross-checked against Biopython (GRAVY matches exactly, isoelectric point within 0.6 units on differing pKa sets).
+
+| Group | Features | Coverage |
+|---|---|---|
+| Composition | length, isoelectric point, GRAVY, net charge at pH 7, cysteine and methionine counts, aromatic, glycine and proline fractions | 99.9% |
+| Topology | transmembrane helix count, signal peptide, FoldIndex disorder overall and by terminus, low-complexity fraction | 99.9% |
+| Taxonomy | superkingdom, kingdom, phylum, genus from the NCBI dump | 98.3% |
+| Construct | host, tag, protease, selenomethionine, autoinduction, codon optimisation, refolding, detergent | host 52.1%, tag 27.2% |
+| Trial record | construct boundaries, expression level, solubility level, final concentration | boundaries 11.9%, expression 10.7% |
+| Archive context | precedent counts, closest identity band, cluster base rate per gate, cluster censored fraction | 73.5% have a precedent |
+
+Two things worth stating. The **archive-context features are computed over the training split only, with the target's own contribution subtracted back out**, because without that leave-one-out a target reads its own fate off its cluster's base rate and every metric flatters itself. And the **transmembrane predictor validates against the archive's own annotation**: targets the archive calls membrane proteins average 9.57 predicted helices against 0.78 for the rest, and 89.4% of them are called polytopic against 7.5%.
+
+Host and tag come from mining the 1,501 shared protocol documents that 95.5% of trials point at, which is why a few hundred kilobytes of free text annotates half the archive.
+
 ## 🎓 Roadmap and the science
 
 The full plan is in `PROJECT_PLAN.md` and the specification in `faffabout_build_spec_v1.md`. The parts that matter most:
@@ -224,9 +244,12 @@ The full plan is in `PROJECT_PLAN.md` and the specification in `faffabout_build_
 - [x] **Phase 1: PDB resolution.** `fetch_pdb_metadata.py` fills `outcomes.resolution` from RCSB: 11,607 of 11,802 distinct ids resolve (the rest are obsolete), 9,440 carry a resolution
 - [x] **Phase 2: censoring.** Two rules in `scripts/censoring.py`, both stored separately and configurable in `config/labels.yaml`: the specification's per-centre wind-down (99.5th-percentile last activity, 180-day window, plus the global freeze) and a new bulk-closure detector. 19.03% of the archive is censored, inside the 12 to 22% gate
 - [x] **Phase 2: labels.** `scripts/06_build_labels.py` builds L1 (906,573 gate transitions over eight gates, 842,681 in loss), L2 (271,619 uncensored terminal outcomes, 3.86% deposited) and L3 (172,695 within-cluster preference pairs, 72,505 of them hard at >70% identity)
-- [ ] **Phase 2: features.** Composition, topology, annotation, construct and archive-context features; ESM-2 disorder on ZeroGPU cached by `seq_md5`; never the raw sequence in a prompt
-- [ ] **Phase 2: splits and SFT.** Cluster, centre and temporal splits; five-task chat JSONL with 8 to 12 paraphrases per template, sorted by token length
+- [x] **Phase 2: features.** `scripts/05_derive_features.py` and `features_seq.py`: composition (pI, GRAVY, charge, cysteines, aromaticity, low complexity), topology (transmembrane helices, signal peptide, FoldIndex disorder by terminus), taxonomy for 98.9% of targets, host and tag mined from the 1,501 shared protocol documents, and leave-one-out archive context. The raw sequence never enters a prompt
+- [ ] **Phase 2: ESM-2 features.** Disorder and embeddings on ZeroGPU, cached by `seq_md5`, to replace the local FoldIndex proxy
+- [x] **Phase 2: splits.** `scripts/splits.py`: cluster-held-out at exactly 80/10/10 with zero cluster and zero sequence leakage, leave-one-centre-out across five centres, and a temporal split that excludes the 7,846 targets straddling the 2014 boundary
+- [x] **Phase 2: SFT corpus.** `scripts/07_build_sft.py`: 120,000 training records in the specification's five-task mix, 2,000 each for validation and test drawn from held-out clusters, 10 paraphrases per template, sorted by token length for MLX padding
 - [ ] **Phase 3: GBM baseline.** LightGBM on the same features; the number the LLM must add over it
+- [ ] **Phase 3: disk and licence.** The model pipeline needs roughly 40 GB and 17 GB is free; Llama 3.1 is a gated repository needing the Meta community licence accepted
 - [ ] **Phase 3: LoRA.** Llama-3.1-8B-Instruct 8-bit, all 32 layers, rank 16, `mask_prompt`, W&B; optional DPO on L3 pairs; fuse with `--de-quantize`
 - [ ] **Phase 3: eval.** Brier, 10-bin ECE, per-gate AUROC, bottleneck top-1, GBM delta on all three splits; 40 graded narratives with zero hallucinated ids
 - [ ] **Phase 4: serve.** Flask app with the Pipeline Rig front end, `POST /predict` contract, censoring visible at all times, live at faffabout.mdeller.com and listed on the mdeller.com launcher

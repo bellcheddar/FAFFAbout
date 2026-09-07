@@ -9,4 +9,6 @@ xlrd>=2.0              # ... or legacy .xls, whichever the tarball carries
 pyyaml>=6.0            # config/features.yaml, config/train_config.yaml
 requests>=2.31         # Zenodo record metadata + download
 tqdm>=4.66             # progress bars on the multi-GB stream
+biopython>=1.83        # independent cross-check for pI and GRAVY in the tests
+numpy>=1.26            # vectorised sequence features
 pytest>=8.0            # tests/

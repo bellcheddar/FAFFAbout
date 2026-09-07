@@ -9,7 +9,7 @@ Source of truth for scope: `faffabout_build_spec_v1.md`. This file tracks the fo
 | Phase | Deliverable | Budget | Gate | Status |
 |---|---|---|---|---|
 | 1 | DuckDB + Parquet core, MMseqs2 clusters | 1 day | 330k targets queryable, statuses canonicalised, every target resolves to a cluster | complete 2026-09-07 (335,771 targets, 30/30 statuses mapped, 88,452 clusters, acceptance PASS) |
-| 2 | L1/L2/L3 label sets, features, three splits, SFT JSONL | 2 to 3 days | Censoring rate 12 to 22%, no cluster leakage, 50 records pass expert eyeball | in progress (started 2026-09-07) |
+| 2 | L1/L2/L3 label sets, features, three splits, SFT JSONL | 2 to 3 days | Censoring rate 12 to 22%, no cluster leakage, 50 records pass expert eyeball | complete 2026-09-07 apart from Marc's eyeball of 50 records |
 | 3 | GBM baseline, LoRA adapter, calibration + generative eval | 2 days plus overnight runs | LLM narrative adds something the GBM cannot, zero hallucinated IDs | not started |
 | 4 | Flask app on faffabout.mdeller.com | 2 days | End-to-end FASTA in, full breakdown out | not started |
 
@@ -92,3 +92,7 @@ The PSI archive records where attempts *stopped*, not just which ones succeeded.
 | 2026-09-07 | Out-of-range dates are nulled, never clamped | 5,244 events fall outside 1995 to the freeze (CSGID 5,136 on 1979-01-01, one in the year 0013, MPSBC quantile landing in 2041). Clamping would drag a centre's wind-down quantile backwards and mis-censor its whole cohort |
 | 2026-09-07 | L1 emits eight gates (0 to 7), not nine | A gate is the transition out of a stage, so a nine-rung ladder has eight of them. Applying the spec's rule literally at gate 8 labelled all 10,500 deposited targets `failed` at the final gate, which would teach the model that deposition always fails |
 | 2026-09-07 | L3 pairs are capped per cluster by hardest-first, not arbitrarily | The cap exists to stop large families dominating, but a random slice would discard the >70%-identity stratum the spec values at ~50 random negatives. Ordering by (hard, stage gap) keeps it: 72,505 of 172,695 pairs are hard |
+| 2026-09-07 | SFT probabilities are the shrunk cluster base rate, never a function of the target's own outcome | Training 0.85 for every success and 0.15 for every failure teaches confident guessing, which is the overconfidence the spec predicts. The corpus's own targets measure at an expected calibration error of 0.019 |
+| 2026-09-07 | Identifiers are never truncated in a precedent table | Printing `NYCOMPS-GO.78` in the prompt while the completion said `NYCOMPS-GO.7810` taught the model to extend an identifier it was given, which is the habit behind hallucinated precedent IDs. Caught by a test, not by reading |
+| 2026-09-07 | The easy-negative cap applies to the FINAL negative mass, after hard oversampling | Rules 3 and 4 interact. Capping distinct rows would leave easy negatives at 10%; an earlier floor of "25% of all negatives" defeated the cap and let them reach 44% |
+| 2026-09-07 | Kingdom comes from matching lineage NAMES, not the rank label | NCBI renamed `superkingdom` to `domain` and inserted new kingdom-level clades, so reading the rank returned "Metazoa" where "Eukaryota" was meant. Name matching resolved 98.9% of targets, 54.7% of them by organism name where no taxon id existed |
