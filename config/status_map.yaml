@@ -1,0 +1,79 @@
+# FAFFAbout canonical status map.
+#
+# Source vocabulary: Documentation/targetTrackEnumeratedDataItems-v1.4.1.xls, sheet
+# "TargetTrack v1.4 Controlled Vocabulary", column "Status (Target or Trial)", cross-checked
+# against the <status> enumeration in targetTrack-v1.4.1.xsd. Both list the same 30 values
+# (the spreadsheet spells "membrane protein solublized"; the XSD and the data spell
+# "solubilized"; both are mapped).
+#
+# scripts/03_normalise_status.py reads this file, asserts every spreadsheet value has an
+# entry, and reports every value seen in status_history that has none.
+#
+# Canonical ladder (stage_ord):
+#   0 selected -> 1 cloned -> 2 expressed -> 3 soluble -> 4 purified
+#   -> 5 crystallised -> 6 diffracting -> 7 structure -> 8 deposited
+#
+# method: which ladder the value belongs to. "common" gates (0-4) are shared; the
+# X-ray, NMR and EM ladders map their own milestones onto gates 5-7.
+#
+# stage_ord null means the value is NOT a ladder position: it is either a terminal marker
+# (work stopped), a side assay that does not advance the pipeline, or uninformative.
+# Those rows keep their status_canon so nothing is silently dropped.
+
+ladder:
+  0: selected
+  1: cloned
+  2: expressed
+  3: soluble
+  4: purified
+  5: crystallised
+  6: diffracting
+  7: structure
+  8: deposited
+
+statuses:
+  # --- common gates -------------------------------------------------------
+  selected:                          {canon: selected,     stage_ord: 0, method: common}
+  cloned:                            {canon: cloned,       stage_ord: 1, method: common}
+  # "expression tested" records that a test was run, not that protein was seen. It does
+  # not advance past cloned. Decision 2026-09-07; revisit if Phase 2 shows it tracks
+  # "expressed" in practice.
+  expression tested:                 {canon: cloned,       stage_ord: 1, method: common, note: expression_tested}
+  expressed:                         {canon: expressed,    stage_ord: 2, method: common}
+  soluble:                           {canon: soluble,      stage_ord: 3, method: common}
+  membrane protein solubilized:      {canon: soluble,      stage_ord: 3, method: common, note: membrane}
+  membrane protein solublized:       {canon: soluble,      stage_ord: 3, method: common, note: membrane_spreadsheet_spelling}
+  purified:                          {canon: purified,     stage_ord: 4, method: common}
+  mass spec verified:                {canon: purified,     stage_ord: 4, method: common, note: qc}
+
+  # --- X-ray ladder --------------------------------------------------------
+  crystallized:                      {canon: crystallised, stage_ord: 5, method: xray}
+  diffraction-quality crystals:      {canon: diffracting,  stage_ord: 6, method: xray}
+  diffraction:                       {canon: diffracting,  stage_ord: 6, method: xray}
+  native diffraction-data:           {canon: diffracting,  stage_ord: 6, method: xray}
+  phasing diffraction-data:          {canon: diffracting,  stage_ord: 6, method: xray, note: phased}
+  crystal structure:                 {canon: structure,    stage_ord: 7, method: xray}
+
+  # --- NMR ladder ----------------------------------------------------------
+  HSQC satisfactory:                 {canon: crystallised, stage_ord: 5, method: nmr, note: hsqc}
+  NMR assigned:                      {canon: diffracting,  stage_ord: 6, method: nmr, note: assigned}
+  NMR backbone resonances assigned:  {canon: diffracting,  stage_ord: 6, method: nmr, note: backbone_assigned}
+  NMR sidechain resonances assigned: {canon: diffracting,  stage_ord: 6, method: nmr, note: sidechain_assigned}
+  NMR structure:                     {canon: structure,    stage_ord: 7, method: nmr}
+  in BMRB:                           {canon: deposited,    stage_ord: 8, method: nmr, note: bmrb}
+
+  # --- EM ladder -----------------------------------------------------------
+  EM images:                         {canon: crystallised, stage_ord: 5, method: em, note: images}
+  EM reconstruction:                 {canon: diffracting,  stage_ord: 6, method: em, note: reconstruction}
+  EM reconstruction in EMDB:         {canon: diffracting,  stage_ord: 6, method: em, note: emdb}
+  EM fitted model:                   {canon: structure,    stage_ord: 7, method: em}
+
+  # --- deposition ----------------------------------------------------------
+  in PDB:                            {canon: deposited,    stage_ord: 8, method: common}
+
+  # --- non-ladder values (kept, never a stage) -----------------------------
+  work stopped:                      {canon: work_stopped, stage_ord: null, method: common, terminal: true}
+  biological assay:                  {canon: assay,        stage_ord: null, method: common}
+  biophysical analysis:              {canon: assay,        stage_ord: null, method: common}
+  test target:                       {canon: test_target,  stage_ord: null, method: common}
+  other:                             {canon: other,        stage_ord: null, method: common}

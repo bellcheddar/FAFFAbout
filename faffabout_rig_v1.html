@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="author" content="Marc C. Deller, D.Phil.">
+<meta name="description" content="FAFFAbout: Fine-tuned Attrition Forecasting From Archives. Predicts where a structural biology target will stall, from the PSI TargetTrack archive.">
+<title>FAFFAbout · Fine-tuned Attrition Forecasting From Archives</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   1. TOKENS — the rig
+   ============================================================ */
+:root{
+  --steel-900:#0d0f11;   /* deepest chassis   */
+  --steel-800:#101315;   /* panel ground      */
+  --steel-700:#16191c;   /* raised panel      */
+  --steel-600:#191c1f;   /* body              */
+  --steel-500:#22272b;   /* control face      */
+  --steel-400:#2c3237;   /* rule / bezel      */
+  --steel-300:#3a4147;   /* hover bezel       */
+
+  --ink-100:#f2f5f7;     /* headline          */
+  --ink-200:#d6dade;     /* body              */
+  --ink-300:#9aa4ab;     /* label             */
+  --ink-400:#6d777e;     /* muted             */
+  --ink-500:#4b545a;     /* faint             */
+
+  --lamp-amber:#ffb020;  /* stall / primary   */
+  --lamp-amber-dim:#2a1f06;
+  --lamp-green:#4fd18b;  /* cleared           */
+  --lamp-green-dim:#12281f;
+  --lamp-red:#e07070;    /* failed            */
+  --lamp-red-dim:#2a1414;
+  --lamp-grey:#8a8aa0;   /* censored          */
+  --lamp-grey-dim:#1c1c22;
+
+  --r:3px;
+}
+*,*::before,*::after{box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;}
+body{
+  margin:0;overflow-x:hidden;background:var(--steel-600);color:var(--ink-200);
+  font-family:'Barlow Condensed',-apple-system,BlinkMacSystemFont,sans-serif;font-size:16px;line-height:1.5;
+}
+img,canvas,svg{max-width:100%;}
+.mono{font-family:'IBM Plex Mono',monospace;}
+.prose{font-family:'Inter',sans-serif;}
+button,select,input,textarea{font-family:inherit;color:inherit;}
+:focus-visible{outline:2px solid var(--lamp-amber);outline-offset:2px;}
+
+/* ============================================================
+   2. CHASSIS HEADER
+   ============================================================ */
+.chassis{
+  background:var(--steel-900);border-bottom:1px solid var(--steel-400);
+  position:sticky;top:0;z-index:60;
+}
+.chassis-in{max-width:1560px;margin:0 auto;padding:11px 20px;display:flex;align-items:center;gap:20px;flex-wrap:wrap;}
+.mark{display:flex;align-items:baseline;gap:10px;flex:0 0 auto;}
+.mark b{
+  font-size:26px;font-weight:700;letter-spacing:.03em;color:var(--ink-100);line-height:1;
+  border-left:4px solid var(--lamp-amber);padding-left:10px;
+}
+.mark b i{font-style:normal;color:var(--lamp-amber);}
+.mark span{
+  font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.13em;color:var(--ink-400);
+  text-transform:uppercase;max-width:230px;line-height:1.35;
+}
+.rail{flex:1;height:1px;background:repeating-linear-gradient(90deg,var(--steel-400) 0 6px,transparent 6px 12px);min-width:20px;}
+
+/* mode selector: an instrument switch, not a tab bar */
+.mode{display:flex;border:1px solid var(--steel-400);border-radius:var(--r);overflow:hidden;background:var(--steel-700);flex:0 0 auto;}
+.mode button{
+  background:none;border:0;padding:8px 17px;font-size:14px;font-weight:600;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--ink-400);cursor:pointer;display:flex;align-items:center;gap:8px;transition:color .15s,background .15s;
+}
+.mode button + button{border-left:1px solid var(--steel-400);}
+.mode button:hover{color:var(--ink-200);background:var(--steel-500);}
+.mode button.on{background:var(--lamp-amber-dim);color:var(--lamp-amber);}
+.mode button::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--steel-300);}
+.mode button.on::before{background:var(--lamp-amber);box-shadow:0 0 6px var(--lamp-amber);}
+
+/* ============================================================
+   3. READOUT STRIP
+   ============================================================ */
+.readout{background:var(--steel-800);border-bottom:1px solid var(--steel-400);}
+.readout-in{
+  max-width:1560px;margin:0 auto;padding:13px 20px;
+  display:flex;align-items:center;gap:24px;flex-wrap:wrap;justify-content:space-between;
+}
+.target-id{font-size:25px;font-weight:600;letter-spacing:.03em;color:var(--ink-100);line-height:1.15;}
+.target-id small{display:block;font-size:13px;letter-spacing:.05em;color:var(--ink-400);font-weight:500;}
+.verdict-chip{
+  font-family:'IBM Plex Mono',monospace;font-size:11.5px;line-height:1.5;color:var(--lamp-amber);
+  border:1px solid #56421a;background:var(--lamp-amber-dim);padding:7px 14px;border-radius:var(--r);
+  letter-spacing:.05em;
+}
+.verdict-chip b{display:block;font-size:13px;letter-spacing:.09em;}
+.verdict-chip.crys{color:#e0a0e8;border-color:#4a2d52;background:#20122a;}
+.verdict-chip.ok{color:var(--lamp-green);border-color:#255a41;background:var(--lamp-green-dim);}
+
+/* ============================================================
+   4. LAYOUT
+   ============================================================ */
+.view{display:none;}
+.view.live{display:block;}
+.deck{max-width:1560px;margin:0 auto;padding:20px;display:grid;grid-template-columns:308px 1fr;gap:20px;align-items:start;}
+
+/* ---- console (inputs) ---- */
+.console{background:var(--steel-700);border:1px solid var(--steel-400);border-radius:var(--r);position:sticky;top:112px;}
+.console h2{
+  margin:0;padding:11px 15px;font-size:13px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-300);border-bottom:1px solid var(--steel-400);background:var(--steel-800);
+  display:flex;justify-content:space-between;align-items:center;
+}
+.console h2 em{font-style:normal;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-500);letter-spacing:.06em;}
+.console-body{padding:15px;}
+.fld{margin-bottom:14px;}
+.fld > label{
+  display:block;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink-400);margin-bottom:5px;
+}
+.fld select,.fld input[type=text],.fld textarea{
+  width:100%;background:var(--steel-500);border:1px solid var(--steel-400);border-radius:var(--r);
+  padding:7px 9px;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--ink-100);
+}
+.fld textarea{resize:vertical;min-height:56px;line-height:1.45;letter-spacing:.02em;}
+.fld select:hover,.fld input:hover,.fld textarea:hover{border-color:var(--steel-300);}
+.seg{display:flex;gap:4px;}
+.seg button{
+  flex:1;background:var(--steel-500);border:1px solid var(--steel-400);border-radius:var(--r);
+  padding:6px 3px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-300);
+  cursor:pointer;transition:all .14s;white-space:nowrap;
+}
+.seg button:hover{border-color:var(--steel-300);color:var(--ink-100);}
+.seg button.on{background:var(--lamp-amber-dim);border-color:#56421a;color:var(--lamp-amber);font-weight:600;}
+.sw{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-top:1px solid var(--steel-500);}
+.sw span{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-300);letter-spacing:.04em;}
+.sw button{
+  width:44px;height:21px;border-radius:11px;border:1px solid var(--steel-400);background:var(--steel-500);
+  position:relative;cursor:pointer;padding:0;transition:background .16s,border-color .16s;
+}
+.sw button::after{
+  content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;
+  background:var(--ink-500);transition:transform .16s,background .16s;
+}
+.sw button.on{background:var(--lamp-amber-dim);border-color:#56421a;}
+.sw button.on::after{transform:translateX(23px);background:var(--lamp-amber);}
+
+/* derived features */
+.derived{border-top:1px solid var(--steel-400);background:var(--steel-800);padding:13px 15px;border-radius:0 0 var(--r) var(--r);}
+.derived h3{margin:0 0 9px;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-500);}
+.derived dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-family:'IBM Plex Mono',monospace;font-size:11px;}
+.derived dt{color:var(--ink-500);}
+.derived dd{margin:0;color:var(--ink-200);text-align:right;}
+
+/* ---- stage bay ---- */
+.bay{min-width:0;}
+.flow-shell{background:var(--steel-700);border:1px solid var(--steel-400);border-radius:var(--r);overflow:hidden;}
+.flow-hd{
+  padding:10px 16px;border-bottom:1px solid var(--steel-400);background:var(--steel-800);
+  display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;
+}
+.flow-hd h2{margin:0;font-size:13px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-300);}
+.flow-hd em{font-style:normal;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-500);letter-spacing:.06em;}
+.flow{display:flex;padding:26px 16px 20px;overflow-x:auto;scrollbar-width:thin;}
+.gate{
+  flex:0 0 116px;text-align:center;position:relative;cursor:pointer;background:none;border:0;
+  color:inherit;padding:0;
+}
+.gate::after{
+  content:"";position:absolute;top:25px;left:calc(50% + 24px);width:calc(100% - 48px);height:3px;
+  background:var(--steel-400);
+}
+.gate:last-child::after{display:none;}
+.gate.pass::after{background:#2f7f5b;}
+.lamp{
+  width:46px;height:46px;border-radius:50%;margin:2px auto 11px;border:3px solid var(--steel-400);
+  background:var(--steel-500);display:flex;align-items:center;justify-content:center;
+  font-size:16px;font-weight:700;position:relative;z-index:2;transition:transform .15s,box-shadow .2s;
+  font-family:'IBM Plex Mono',monospace;color:var(--ink-500);
+}
+.gate:hover .lamp{transform:scale(1.09);}
+.gate.pass .lamp{border-color:#2f7f5b;background:var(--lamp-green-dim);color:var(--lamp-green);}
+.gate.stall .lamp{border-color:var(--lamp-amber);background:var(--lamp-amber-dim);color:var(--lamp-amber);box-shadow:0 0 0 6px rgba(255,176,32,.14);}
+.gate.dead .lamp{border-color:#3a2020;background:#1d1414;color:#6b4444;}
+.gate.sel .lamp{box-shadow:0 0 0 3px var(--steel-300);}
+.gate.stall.sel .lamp{box-shadow:0 0 0 6px rgba(255,176,32,.24);}
+.g-name{font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-300);font-weight:600;line-height:1.2;}
+.gate.stall .g-name{color:var(--lamp-amber);}
+.gate.dead .g-name{color:var(--ink-500);}
+.g-pct{font-family:'IBM Plex Mono',monospace;font-size:17px;font-weight:600;color:var(--ink-100);margin-top:3px;}
+.gate.dead .g-pct{color:#6b4444;}
+.g-drop{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-500);}
+.gate.stall .g-drop{color:#c08a2a;}
+
+/* ---- drawer ---- */
+.drawer{
+  background:var(--steel-800);border:1px solid var(--steel-400);border-top:3px solid var(--lamp-amber);
+  border-radius:0 0 var(--r) var(--r);padding:18px 20px 20px;margin-top:-1px;
+}
+.drawer.n-stall{border-top-color:var(--steel-300);}
+.drawer h3{margin:0 0 3px;font-size:21px;font-weight:600;letter-spacing:.03em;color:var(--lamp-amber);}
+.drawer.n-stall h3{color:var(--ink-100);}
+.drawer h3 span{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-500);letter-spacing:.1em;margin-left:9px;}
+.drawer > p{margin:0 0 16px;font-family:'Inter',sans-serif;font-size:13.5px;line-height:1.62;color:var(--ink-300);max-width:74ch;}
+
+.flagbar{
+  display:flex;gap:9px;align-items:flex-start;background:var(--lamp-grey-dim);border:1px dashed #3d3d4d;
+  border-radius:var(--r);padding:10px 13px;margin-bottom:16px;font-family:'Inter',sans-serif;
+  font-size:12.5px;color:#9d9db4;line-height:1.55;max-width:82ch;
+}
+.flagbar b{color:#c3c3da;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.13em;
+  text-transform:uppercase;flex:0 0 auto;padding-top:2px;}
+
+.sub{font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-500);margin:0 0 8px;}
+.tbl{width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:12px;}
+.tbl th{
+  text-align:left;color:var(--ink-500);font-weight:500;padding:0 12px 6px 0;border-bottom:1px solid var(--steel-400);
+  letter-spacing:.07em;font-size:10px;text-transform:uppercase;white-space:nowrap;
+}
+.tbl td{padding:8px 12px 8px 0;border-bottom:1px solid var(--steel-500);color:var(--ink-200);vertical-align:top;}
+.tbl tr.censored td{color:var(--ink-400);}
+.tag{display:inline-block;padding:2px 8px;border-radius:2px;font-size:10px;letter-spacing:.05em;white-space:nowrap;}
+.tag.ok{background:var(--lamp-green-dim);color:var(--lamp-green);}
+.tag.no{background:var(--lamp-red-dim);color:var(--lamp-red);}
+.tag.cens{background:var(--lamp-grey-dim);color:var(--lamp-grey);border:1px dashed #3d3d4d;}
+
+.cf{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:10px;margin-top:8px;}
+.cf button{
+  text-align:left;background:var(--steel-700);border:1px solid var(--steel-400);border-left:3px solid var(--lamp-green);
+  padding:10px 13px;font-family:'Inter',sans-serif;font-size:12.5px;color:var(--ink-300);
+  border-radius:0 var(--r) var(--r) 0;cursor:pointer;line-height:1.45;transition:background .14s;
+}
+.cf button:hover{background:var(--steel-500);}
+.cf button b{display:block;font-family:'IBM Plex Mono',monospace;color:var(--lamp-green);font-size:15px;margin-bottom:2px;}
+.cf button.down{border-left-color:var(--lamp-red);}
+.cf button.down b{color:var(--lamp-red);}
+.cf button.flat{border-left-color:var(--steel-300);}
+.cf button.flat b{color:var(--ink-400);}
+
+/* ============================================================
+   5. MAP VIEW — same chassis, spatial navigation
+   ============================================================ */
+.map-shell{max-width:1560px;margin:0 auto;padding:20px;}
+.map-frame{background:var(--steel-800);border:1px solid var(--steel-400);border-radius:var(--r);overflow:hidden;position:relative;}
+#field{display:block;width:100%;height:560px;background:var(--steel-900);cursor:crosshair;}
+.hud{
+  position:absolute;top:16px;left:16px;background:rgba(13,15,17,.9);border:1px solid var(--steel-400);
+  border-left:3px solid var(--lamp-amber);border-radius:var(--r);padding:14px 16px;max-width:262px;
+}
+.hud h3{margin:0 0 2px;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-500);}
+.hud h3 + p{margin:0 0 12px;font-size:22px;font-weight:600;color:var(--ink-100);letter-spacing:.03em;line-height:1.15;}
+.hud dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-family:'IBM Plex Mono',monospace;font-size:11px;}
+.hud dt{color:var(--ink-500);}
+.hud dd{margin:0;color:var(--ink-200);text-align:right;}
+.hud dd.hot{color:var(--lamp-amber);}
+.knobs{position:absolute;top:16px;right:16px;display:flex;flex-direction:column;gap:5px;}
+.knobs button{
+  width:36px;height:36px;background:rgba(13,15,17,.9);border:1px solid var(--steel-400);color:var(--ink-300);
+  font-size:16px;cursor:pointer;border-radius:var(--r);font-family:'IBM Plex Mono',monospace;line-height:1;
+}
+.knobs button:hover{border-color:var(--lamp-amber);color:var(--lamp-amber);}
+.key{
+  position:absolute;bottom:16px;left:16px;display:flex;gap:17px;flex-wrap:wrap;
+  font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink-400);
+  background:rgba(13,15,17,.88);padding:9px 14px;border:1px solid var(--steel-400);border-radius:var(--r);
+}
+.key i{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;}
+.scalebar{
+  position:absolute;bottom:16px;right:16px;font-family:'IBM Plex Mono',monospace;font-size:10px;
+  color:var(--ink-500);text-align:right;background:rgba(13,15,17,.88);padding:7px 12px;
+  border:1px solid var(--steel-400);border-radius:var(--r);letter-spacing:.05em;
+}
+.neighbours{margin-top:20px;background:var(--steel-700);border:1px solid var(--steel-400);border-radius:var(--r);padding:16px 18px 18px;}
+.neighbours h3{margin:0 0 11px;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-500);}
+.n-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(186px,1fr));gap:10px;}
+.n-card{background:var(--steel-800);border:1px solid var(--steel-400);border-left:3px solid var(--steel-300);
+  border-radius:0 var(--r) var(--r) 0;padding:11px 13px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-400);}
+.n-card b{display:block;color:var(--ink-100);font-size:13px;margin-bottom:3px;letter-spacing:.03em;font-weight:600;}
+.n-card u{display:block;text-decoration:none;margin-top:7px;font-size:10.5px;letter-spacing:.04em;}
+.n-card.ok{border-left-color:var(--lamp-green);} .n-card.ok u{color:var(--lamp-green);}
+.n-card.no{border-left-color:var(--lamp-red);}   .n-card.no u{color:var(--lamp-red);}
+.n-card.cens{border-left-style:dashed;border-left-color:var(--lamp-grey);} .n-card.cens u{color:var(--lamp-grey);}
+
+/* ============================================================
+   6. FOOT
+   ============================================================ */
+.foot{
+  border-top:1px solid var(--steel-400);background:var(--steel-900);margin-top:24px;
+  padding:16px 20px 22px;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:10.5px;
+  color:var(--ink-500);letter-spacing:.06em;line-height:1.9;
+}
+.foot a{color:var(--ink-400);text-decoration:none;border-bottom:1px solid var(--steel-400);}
+.foot a:hover{color:var(--lamp-amber);border-bottom-color:var(--lamp-amber);}
+.foot .warn{color:#6b5a2a;display:block;}
+
+/* ============================================================
+   7. MOBILE
+   ============================================================ */
+@media (max-width:1080px){
+  .deck{grid-template-columns:1fr;}
+  .console{position:static;}
+  .derived dl{grid-template-columns:repeat(2,auto 1fr);}
+}
+@media (max-width:720px){
+  .chassis-in{padding:10px 13px;gap:12px;}
+  .mark b{font-size:22px;}
+  .mark span{display:none;}
+  .rail{display:none;}
+  .mode{width:100%;}
+  .mode button{flex:1;justify-content:center;padding:8px 10px;font-size:13px;}
+  .readout-in{padding:11px 13px;gap:12px;}
+  .target-id{font-size:20px;}
+  .verdict-chip{font-size:11px;padding:6px 11px;}
+  .deck,.map-shell{padding:13px;gap:14px;}
+  .flow{padding:20px 13px 16px;}
+  .gate{flex:0 0 100px;}
+  .drawer{padding:15px 14px 16px;}
+  .drawer h3{font-size:18px;}
+  .tbl{font-size:11px;}
+  .tbl th:nth-child(2),.tbl td:nth-child(2){display:none;}
+  #field{height:400px;}
+  .hud{position:static;max-width:none;border:0;border-bottom:1px solid var(--steel-400);border-radius:0;background:var(--steel-800);}
+  .key{position:static;border:0;border-top:1px solid var(--steel-400);border-radius:0;}
+  .scalebar,.knobs{display:none;}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;}}
+</style>
+</head>
+<body>
+
+<!-- ============ CHASSIS ============ -->
+<header class="chassis">
+  <div class="chassis-in">
+    <div class="mark">
+      <b>FAFF<i>About</i></b>
+      <span>Fine-tuned Attrition<br>Forecasting From Archives</span>
+    </div>
+    <div class="rail"></div>
+    <div class="mode">
+      <button class="on" data-view="rig">Rig</button>
+      <button data-view="map">Archive map</button>
+    </div>
+  </div>
+</header>
+
+<!-- ============ READOUT ============ -->
+<div class="readout">
+  <div class="readout-in">
+    <div class="target-id" id="tgtId">NESG&#8209;TR4102
+      <small id="tgtSub">α/β hydrolase · Thermus thermophilus HB8 · 312 aa</small>
+    </div>
+    <div class="verdict-chip" id="verdict">
+      <b>PREDICTED STALL · SOLUBILISATION</b>
+      survival 0.52 [0.38–0.64] · deposition 0.07 · evidence MODERATE
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     VIEW 1 — PIPELINE RIG
+     ============================================================ -->
+<section class="view live" id="v-rig">
+  <div class="deck">
+
+    <!-- ---- console ---- -->
+    <aside class="console">
+      <h2>Construct console <em>live</em></h2>
+      <div class="console-body">
+
+        <div class="fld">
+          <label for="seq">Sequence · FASTA, UniProt or PDB</label>
+          <textarea id="seq" spellcheck="false">MSKIALVLGGSSGIGLATARLFAQEGWQVSLLARSQDKLDALAAELGGSAHAYACDVTDAQAVEAAFAQIDDAWGGLDVLVNAAGVMHLGPLADTDAQDFDRTLAVNLTGAFLTAREALRRMLPRQRGAILNIASIAGLRPAPFMAAYCASKAGLIGLTQALALELAPYRIRVNCVAPGVIDTPMLAGLDAAQRAALLAQIPLGRLGEPHEIAAAVLFLASDDASYITGQTLAVDGGLTAGHAAPGLLAALEHHHHHH</textarea>
+        </div>
+
+        <div class="fld">
+          <label for="method">Target method</label>
+          <select id="method">
+            <option value="xray">X-ray crystallography</option>
+            <option value="nmr">Solution NMR</option>
+            <option value="em">Cryo-EM</option>
+          </select>
+        </div>
+
+        <div class="fld">
+          <label>Construct boundaries</label>
+          <div class="seg" data-group="bounds">
+            <button class="on" data-v="full">1–312</button>
+            <button data-v="ntrim">35–312</button>
+            <button data-v="ctrim">1–288</button>
+            <button data-v="both">35–288</button>
+          </div>
+        </div>
+
+        <div class="fld">
+          <label for="host">Expression host</label>
+          <select id="host">
+            <option value="bl21">E. coli BL21(DE3), 37 °C</option>
+            <option value="rosetta">E. coli Rosetta 2, 37 °C</option>
+            <option value="arctic">E. coli Arctic Express, 12 °C</option>
+            <option value="cellfree">Cell-free (PURE)</option>
+            <option value="sf9">Sf9 insect</option>
+            <option value="hek">HEK293</option>
+          </select>
+        </div>
+
+        <div class="fld">
+          <label>Affinity tag</label>
+          <div class="seg" data-group="tag">
+            <button class="on" data-v="his">His6</button>
+            <button data-v="mbp">MBP</button>
+            <button data-v="sumo">SUMO</button>
+            <button data-v="gst">GST</button>
+          </div>
+        </div>
+
+        <div class="fld">
+          <label for="prot">Protease site</label>
+          <select id="prot">
+            <option value="tev">TEV</option>
+            <option value="3c">HRV 3C</option>
+            <option value="thr">Thrombin</option>
+            <option value="none">None (tag retained)</option>
+          </select>
+        </div>
+
+        <div class="fld">
+          <label for="purif">Purification route</label>
+          <select id="purif">
+            <option value="imac">IMAC only</option>
+            <option value="imacsec" selected>IMAC + SEC</option>
+            <option value="full">IMAC + IEX + SEC</option>
+          </select>
+        </div>
+
+        <div class="sw"><span>Codon optimised</span><button data-flag="codon" aria-pressed="false"></button></div>
+        <div class="sw"><span>SeMet labelling</span><button data-flag="semet" aria-pressed="false"></button></div>
+        <div class="sw"><span>Refolding acceptable</span><button data-flag="refold" aria-pressed="false"></button></div>
+      </div>
+
+      <div class="derived">
+        <h3>Derived · computed on submit</h3>
+        <dl>
+          <dt>Length</dt><dd id="dLen">312 aa</dd>
+          <dt>pI</dt><dd>5.8</dd>
+          <dt>GRAVY</dt><dd>−0.21</dd>
+          <dt>Cys</dt><dd>4</dd>
+          <dt>Disorder</dt><dd>11% N-term</dd>
+          <dt>TM helices</dt><dd>0</dd>
+          <dt>Low complexity</dt><dd>3.2%</dd>
+          <dt>Pfam</dt><dd>PF00561</dd>
+          <dt>Precedents</dt><dd id="dPrec">5</dd>
+          <dt>Closest</dt><dd>71% id</dd>
+        </dl>
+      </div>
+    </aside>
+
+    <!-- ---- stage bay ---- -->
+    <div class="bay">
+      <div class="flow-shell">
+        <div class="flow-hd">
+          <h2>Attrition pipeline</h2>
+          <em id="flowNote">select a gate for its precedent record</em>
+        </div>
+        <div class="flow" id="flow" role="tablist" aria-label="Pipeline stage gates"></div>
+      </div>
+      <div class="drawer" id="drawer"></div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================================================
+     VIEW 2 — ARCHIVE MAP
+     ============================================================ -->
+<section class="view" id="v-map">
+  <div class="map-shell">
+    <div class="map-frame">
+      <canvas id="field" width="1520" height="560"
+        aria-label="Archive map: every PSI TargetTrack target positioned by sequence and property similarity, coloured by outcome"></canvas>
+
+      <div class="hud">
+        <h3>Query position</h3>
+        <p>NESG-TR4102</p>
+        <dl>
+          <dt>Region</dt><dd>α/β hydrolase</dd>
+          <dt>Neighbours</dt><dd id="mNb">1,204</dd>
+          <dt>Deposited</dt><dd>81 · 6.7%</dd>
+          <dt>Stalled</dt><dd>904 · 75.1%</dd>
+          <dt>Censored</dt><dd>219 · 18.2%</dd>
+          <dt>Local vs archive</dt><dd class="hot">6.7% / 4.1%</dd>
+        </dl>
+      </div>
+
+      <div class="knobs">
+        <button id="zIn" aria-label="Zoom in">+</button>
+        <button id="zOut" aria-label="Zoom out">−</button>
+        <button id="zRst" aria-label="Reset view">⟲</button>
+      </div>
+
+      <div class="key">
+        <span><i style="background:#4fd18b"></i>deposited</span>
+        <span><i style="background:#e07070;opacity:.7"></i>stalled</span>
+        <span><i style="background:#8a8aa0;opacity:.6"></i>censored</span>
+        <span><i style="background:#ffb020;box-shadow:0 0 0 3px rgba(255,176,32,.25)"></i>query</span>
+      </div>
+
+      <div class="scalebar" id="scale">331,472 targets · 2000–2017<br>drag to pan · scroll to zoom</div>
+    </div>
+
+    <div class="neighbours">
+      <h3>Nearest precedents in this region</h3>
+      <div class="n-cards">
+        <div class="n-card ok"><b>JCSG-412907</b>58% id · T. maritima · JCSG<u>deposited · SeMet · 1.9 Å</u></div>
+        <div class="n-card no"><b>NESG-TR2841</b>71% id · T. thermophilus · NESG<u>stalled · crystallisation</u></div>
+        <div class="n-card cens"><b>MCSG-APC7301</b>44% id · B. subtilis · MCSG<u>censored · centre closure 2015</u></div>
+        <div class="n-card no"><b>NYSGRC-011923</b>39% id · E. coli · NYSGRC<u>stalled · solubility</u></div>
+        <div class="n-card cens"><b>CESG-4471</b>31% id · A. thaliana · CESG<u>censored · centre closure 2010</u></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="foot">
+  FAFFAbout v1 · fine-tuned on PSI TargetTrack 2000–2017 (Zenodo 10.5281/zenodo.821654)<br>
+  <a href="https://marcdeller.com" target="_blank" rel="noopener noreferrer">marcdeller.com</a> ·
+  <a href="mailto:marc@marcdeller.com">marc@marcdeller.com</a>
+  <span class="warn">Interface demonstration. Figures shown are illustrative placeholders, not model output.</span>
+</footer>
+
+<script>
+/* ============================================================
+   1. PIPELINE MODEL
+   ============================================================ */
+const GATE_SETS = {
+  xray:['Selected','Cloned','Expressed','Soluble','Purified','Crystallised','Diffracting','Structure','Deposited'],
+  nmr :['Selected','Cloned','Expressed','Soluble','Purified','Labelled','Assigned','Structure','Deposited'],
+  em  :['Selected','Cloned','Expressed','Soluble','Purified','Vitrified','Classified','Structure','Deposited']
+};
+/* conditional probability of clearing each gate, given the previous one cleared */
+const BASE = {
+  xray:[1.00,0.94,0.86,0.64,0.85,0.43,0.58,0.73,0.88],
+  nmr :[1.00,0.94,0.86,0.64,0.85,0.79,0.31,0.66,0.90],
+  em  :[1.00,0.94,0.86,0.64,0.85,0.67,0.49,0.62,0.87]
+};
+/* index 3 = Soluble, 5 = Crystallised/Labelled/Vitrified, 7 = Structure */
+const MODS = {
+  host:{
+    bl21:{}, rosetta:{2:+0.04}, arctic:{2:-0.03,3:+0.11},
+    cellfree:{2:+0.02,3:+0.06,4:-0.04}, sf9:{2:-0.12,3:+0.05}, hek:{2:-0.16,3:+0.09}
+  },
+  bounds:{ full:{}, ntrim:{3:+0.18,5:+0.09}, ctrim:{3:+0.05,5:+0.04}, both:{3:+0.21,5:+0.12,2:-0.03} },
+  tag:{ his:{}, mbp:{3:+0.14,5:-0.11}, sumo:{3:+0.08,5:-0.03}, gst:{3:+0.09,5:-0.14} },
+  purif:{ imac:{5:-0.06}, imacsec:{}, full:{5:+0.05,4:-0.03} },
+  flag:{ codon:{2:+0.03}, semet:{7:+0.07,5:-0.02}, refold:{3:+0.10,4:-0.08} }
+};
+const state = {
+  method:'xray', host:'bl21', bounds:'full', tag:'his', purif:'imacsec',
+  codon:false, semet:false, refold:false, selected:null
+};
+
+/* per-gate narrative + precedent rows */
+const PRECEDENTS = [
+  {id:'NESG-TR2841',  centre:'NESG',   org:'T. thermophilus', pid:71, far:4, note:'no crystals · 1,536 conditions', cls:'no'},
+  {id:'JCSG-412907',  centre:'JCSG',   org:'T. maritima',     pid:58, far:8, note:'SeMet · 1.9 Å · N-term truncated', cls:'ok'},
+  {id:'MCSG-APC7301', centre:'MCSG',   org:'B. subtilis',     pid:44, far:3, note:'censored · centre closure 2015', cls:'cens'},
+  {id:'NYSGRC-011923',centre:'NYSGRC', org:'E. coli',         pid:39, far:2, note:'inclusion bodies · 3 hosts tried', cls:'no'},
+  {id:'CESG-4471',    centre:'CESG',   org:'A. thaliana',     pid:31, far:1, note:'censored · centre closure 2010', cls:'cens'}
+];
+const GATE_COPY = [
+  'Every archive record starts here, so this gate is definitional rather than predictive. What it does carry is selection bias: PSI centres filtered for soluble prokaryotic targets with novel folds, so the negatives downstream are conditioned on having already passed that filter.',
+  'Cloning rarely kills a target outright. Where it does, the archive usually shows repeated construct attempts over months rather than a single clean failure, which is why this gate looks generous.',
+  'Expression is where codon usage and host choice first bite. Three of five precedents cleared it comfortably; the one that did not had been pushed through three hosts before the file was closed.',
+  'The largest single drop in this run. Precedents express well and then go almost entirely into inclusion bodies. The one deposited structure in this region dropped induction to 12 °C and removed the first 34 residues, which the disorder predictor flags on your sequence too.',
+  'Attrition here is mostly aggregation on tag cleavage and loss over sizing. Adding an ion-exchange step recovers a little, at the cost of yield.',
+  'The second wall. Once soluble protein exists, crystallisation is the dominant bottleneck across the entire archive, and fusion tags that rescued solubility upstream tend to cost you here.',
+  'Crystals that never diffract are recorded as a distinct outcome in TargetTrack, which is why this is its own gate rather than folded into the one before it.',
+  'Phasing and model building. Selenomethionine substitution moves this gate materially and costs a little upstream.',
+  'Deposition is near-automatic once a structure is solved, so a low number here is inherited from every gate before it rather than generated at this one.'
+];
+
+/* ============================================================
+   2. COMPUTE
+   ============================================================ */
+function conditional(){
+  const p = BASE[state.method].slice();
+  const apply = m => { for(const k in m){ p[k] = Math.max(0.02, Math.min(0.99, p[k] + m[k])); } };
+  apply(MODS.host[state.host]||{});
+  apply(MODS.bounds[state.bounds]||{});
+  apply(MODS.tag[state.tag]||{});
+  apply(MODS.purif[state.purif]||{});
+  ['codon','semet','refold'].forEach(f=>{ if(state[f]) apply(MODS.flag[f]); });
+  return p;
+}
+function cumulative(cond){
+  const out=[]; let run=1;
+  cond.forEach(c=>{ run*=c; out.push(run); });
+  return out;
+}
+/* the bottleneck is the largest absolute drop in survival */
+function bottleneck(cum){
+  let worst=1, drop=-1;
+  for(let i=1;i<cum.length;i++){
+    const d = cum[i-1]-cum[i];
+    if(d>drop){drop=d;worst=i;}
+  }
+  return {i:worst, drop:drop};
+}
+const CENSORED = PRECEDENTS.filter(p=>p.cls==='cens').length;
+function interval(p){
+  const w = 0.09 + 0.045*CENSORED;   /* censoring widens the band */
+  return [Math.max(0,p-w), Math.min(1,p+w)];
+}
+
+/* ============================================================
+   3. RENDER
+   ============================================================ */
+function render(){
+  const names = GATE_SETS[state.method];
+  const cond  = conditional();
+  const cum   = cumulative(cond);
+  const bn    = bottleneck(cum);
+  if(state.selected===null) state.selected = bn.i;
+
+  /* gates */
+  const flow = document.getElementById('flow');
+  flow.innerHTML = names.map((n,i)=>{
+    let cls='dead';
+    if(i < bn.i) cls='pass';
+    else if(i === bn.i) cls='stall';
+    if(i === state.selected) cls += ' sel';
+    const glyph = i<bn.i ? '✓' : (i===bn.i ? '!' : '·');
+    const drop  = i===0 ? '' : '−'+((cum[i-1]-cum[i])*100).toFixed(0)+' pts';
+    return '<button class="gate '+cls+'" data-i="'+i+'" role="tab" aria-selected="'+(i===state.selected)+'">'+
+             '<div class="lamp">'+glyph+'</div>'+
+             '<div class="g-name">'+n+'</div>'+
+             '<div class="g-pct">'+cum[i].toFixed(2)+'</div>'+
+             '<div class="g-drop">'+drop+'</div>'+
+           '</button>';
+  }).join('');
+  flow.querySelectorAll('.gate').forEach(g=>{
+    g.addEventListener('click',()=>{ state.selected = parseInt(g.dataset.i,10); render(); });
+  });
+
+  /* readout chip */
+  const iv = interval(cum[bn.i]);
+  const chip = document.getElementById('verdict');
+  chip.className = 'verdict-chip' + (bn.i>=5 ? ' crys' : '') + (cum[8]>0.25 ? ' ok' : '');
+  chip.innerHTML = '<b>PREDICTED STALL · '+names[bn.i].toUpperCase()+'</b>'+
+    'survival '+cum[bn.i].toFixed(2)+' ['+iv[0].toFixed(2)+'–'+iv[1].toFixed(2)+'] · deposition '+
+    cum[8].toFixed(2)+' · evidence '+(PRECEDENTS.length>=5?'MODERATE':'WEAK');
+
+  /* drawer */
+  const isStall = state.selected === bn.i;
+  const rows = PRECEDENTS.map(p=>{
+    const reached = p.far >= state.selected;
+    const badge = p.cls==='cens'
+      ? '<span class="tag cens">'+p.note+'</span>'
+      : '<span class="tag '+(reached?'ok':'no')+'">'+(reached?'cleared':p.note)+'</span>';
+    return '<tr class="'+(p.cls==='cens'?'censored':'')+'"><td>'+p.id+'</td><td>'+p.centre+'</td><td><i>'+p.org+
+           '</i></td><td>'+p.pid+'%</td><td>'+GATE_SETS[state.method][p.far]+'</td><td>'+badge+'</td></tr>';
+  }).join('');
+
+  const cf = counterfactuals(cum[bn.i], bn.i);
+
+  document.getElementById('drawer').className = 'drawer' + (isStall ? '' : ' n-stall');
+  document.getElementById('drawer').innerHTML =
+    '<h3>Gate '+(state.selected+1)+' · '+names[state.selected]+
+      '<span>'+(isStall?'PREDICTED STALL':'cleared upstream of the stall')+' · conditional '+cond[state.selected].toFixed(2)+'</span></h3>'+
+    '<p>'+GATE_COPY[state.selected]+'</p>'+
+    '<div class="flagbar"><b>Censoring</b><span>'+CENSORED+' of '+PRECEDENTS.length+
+      ' precedents were closed when their centre wound down, not because the work failed. They are excluded from the failure rate and the interval above has been widened by ±'+
+      (0.045*CENSORED).toFixed(2)+' to reflect it.</span></div>'+
+    '<p class="sub">Archive precedents · MMseqs2, 30% identity threshold</p>'+
+    '<table class="tbl"><thead><tr><th>Target</th><th>Centre</th><th>Source</th><th>Id</th><th>Furthest</th><th>Outcome</th></tr></thead><tbody>'+
+      rows+'</tbody></table>'+
+    '<p class="sub" style="margin-top:18px">Counterfactuals · click to apply</p>'+
+    '<div class="cf">'+cf+'</div>';
+
+  document.querySelectorAll('#drawer .cf button').forEach(b=>{
+    b.addEventListener('click',()=>{
+      const [k,v] = b.dataset.set.split(':');
+      if(k==='flag'){ state[v] = !state[v]; syncFlags(); }
+      else { state[k] = v; syncControls(); }
+      state.selected = null;
+      render();
+    });
+  });
+
+  document.getElementById('flowNote').textContent =
+    'bottleneck at gate '+(bn.i+1)+' · '+(bn.drop*100).toFixed(0)+' pts lost';
+}
+
+/* build counterfactual buttons by actually re-running the model */
+function counterfactuals(baseP, baseGate){
+  const trials = [
+    {label:'Host → Arctic Express, 12 °C', set:'host:arctic',  skip:state.host==='arctic'},
+    {label:'Trim residues 1–34 (disorder)', set:'bounds:ntrim', skip:state.bounds!=='full'},
+    {label:'Tag → MBP fusion',              set:'tag:mbp',      skip:state.tag==='mbp'},
+    {label:'Add SeMet labelling',           set:'flag:semet',   skip:state.semet},
+    {label:'Codon optimise',                set:'flag:codon',   skip:state.codon},
+    {label:'Allow refolding from IBs',      set:'flag:refold',  skip:state.refold}
+  ].filter(t=>!t.skip).slice(0,4);
+
+  return trials.map(t=>{
+    const snap = Object.assign({},state);
+    const [k,v] = t.set.split(':');
+    if(k==='flag') state[v]=true; else state[k]=v;
+    const cum = cumulative(conditional());
+    const bn  = bottleneck(cum);
+    Object.assign(state,snap);
+
+    const delta = (cum[baseGate]-baseP)*100;
+    const moved = bn.i !== baseGate;
+    const cls = delta > 1.5 ? '' : (delta < -1.5 ? 'down' : 'flat');
+    const sign = delta>0 ? '+' : '';
+    const tail = moved
+      ? 'wall moves to '+GATE_SETS[state.method][bn.i].toLowerCase()
+      : 'bottleneck unchanged';
+    return '<button class="'+cls+'" data-set="'+t.set+'"><b>'+sign+delta.toFixed(0)+' pts</b>'+
+           t.label+'<br><span style="color:var(--ink-500);font-size:11.5px">'+tail+'</span></button>';
+  }).join('');
+}
+
+/* ============================================================
+   4. CONTROLS
+   ============================================================ */
+function syncControls(){
+  document.getElementById('host').value   = state.host;
+  document.getElementById('method').value = state.method;
+  document.getElementById('purif').value  = state.purif;
+  document.querySelectorAll('.seg[data-group="bounds"] button').forEach(b=>
+    b.classList.toggle('on', b.dataset.v===state.bounds));
+  document.querySelectorAll('.seg[data-group="tag"] button').forEach(b=>
+    b.classList.toggle('on', b.dataset.v===state.tag));
+  const lens = {full:'312 aa',ntrim:'278 aa',ctrim:'288 aa',both:'254 aa'};
+  document.getElementById('dLen').textContent = lens[state.bounds];
+}
+function syncFlags(){
+  document.querySelectorAll('.sw button').forEach(b=>{
+    const on = !!state[b.dataset.flag];
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+['host','method','purif'].forEach(id=>{
+  document.getElementById(id).addEventListener('change',e=>{
+    state[id] = e.target.value; state.selected = null; render();
+  });
+});
+document.querySelectorAll('.seg').forEach(grp=>{
+  grp.querySelectorAll('button').forEach(b=>{
+    b.addEventListener('click',()=>{
+      state[grp.dataset.group] = b.dataset.v;
+      state.selected = null; syncControls(); render();
+    });
+  });
+});
+document.querySelectorAll('.sw button').forEach(b=>{
+  b.addEventListener('click',()=>{
+    state[b.dataset.flag] = !state[b.dataset.flag];
+    state.selected = null; syncFlags(); render();
+  });
+});
+
+/* ============================================================
+   5. VIEW SWITCH
+   ============================================================ */
+document.querySelectorAll('.mode button').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.mode button').forEach(x=>x.classList.remove('on'));
+    document.querySelectorAll('.view').forEach(v=>v.classList.remove('live'));
+    b.classList.add('on');
+    document.getElementById('v-'+b.dataset.view).classList.add('live');
+    if(b.dataset.view==='map') drawField();
+  });
+});
+
+/* ============================================================
+   6. ARCHIVE MAP
+   ============================================================ */
+const cv = document.getElementById('field');
+const ctx = cv.getContext('2d');
+let zoom = 1, panX = 0, panY = 0, drag = null;
+
+function seeded(i){ const x = Math.sin(i*12.9898)*43758.5453; return x - Math.floor(x); }
+
+/* pre-generate the cloud once so pan and zoom are cheap */
+const CLOUD = (()=>{
+  const centres = [[0.20,0.30],[0.50,0.55],[0.76,0.26],[0.38,0.79],[0.86,0.68],[0.62,0.86],[0.12,0.66]];
+  const pts=[];
+  for(let i=0;i<4200;i++){
+    const c = centres[i % centres.length];
+    const a = seeded(i*3.1)*Math.PI*2;
+    const rr = Math.pow(seeded(i*7.7),0.55)*0.18;
+    const roll = seeded(i*11.3);
+    pts.push({
+      x:c[0]+Math.cos(a)*rr*1.55,
+      y:c[1]+Math.sin(a)*rr,
+      k: roll<0.048 ? 0 : (roll<0.23 ? 1 : 2)   /* 0 deposited, 1 censored, 2 stalled */
+    });
+  }
+  return pts;
+})();
+const COLS = ['rgba(79,209,139,0.88)','rgba(138,138,160,0.34)','rgba(224,112,112,0.26)'];
+const SIZES = [2.0,1.25,1.25];
+
+function drawField(){
+  const W = cv.width, H = cv.height;
+  ctx.fillStyle = '#0d0f11';
+  ctx.fillRect(0,0,W,H);
+
+  /* faint grid so pan and zoom read as movement */
+  ctx.strokeStyle = 'rgba(44,50,55,0.5)'; ctx.lineWidth = 1;
+  const step = 80*zoom;
+  for(let x=(panX%step+step)%step; x<W; x+=step){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for(let y=(panY%step+step)%step; y<H; y+=step){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  const px = p => (p.x - 0.5)*W*zoom + W/2 + panX;
+  const py = p => (p.y - 0.5)*H*zoom + H/2 + panY;
+
+  /* draw stalled and censored first, deposited on top so successes stay visible */
+  [2,1,0].forEach(kind=>{
+    ctx.fillStyle = COLS[kind];
+    CLOUD.forEach(p=>{
+      if(p.k!==kind) return;
+      const x = px(p), y = py(p);
+      if(x<-6||x>W+6||y<-6||y>H+6) return;
+      ctx.beginPath();
+      ctx.arc(x, y, SIZES[kind]*Math.min(2.2,zoom), 0, Math.PI*2);
+      ctx.fill();
+    });
+  });
+
+  /* query reticle */
+  const q = {x:0.50,y:0.545};
+  const qx = px(q), qy = py(q);
+  ctx.strokeStyle = 'rgba(255,176,32,0.34)'; ctx.lineWidth = 1;
+  [30,58,92].forEach(r=>{ ctx.beginPath(); ctx.arc(qx,qy,r*zoom,0,Math.PI*2); ctx.stroke(); });
+  ctx.beginPath(); ctx.moveTo(qx-14*zoom,qy); ctx.lineTo(qx-6*zoom,qy);
+  ctx.moveTo(qx+6*zoom,qy); ctx.lineTo(qx+14*zoom,qy);
+  ctx.moveTo(qx,qy-14*zoom); ctx.lineTo(qx,qy-6*zoom);
+  ctx.moveTo(qx,qy+6*zoom); ctx.lineTo(qx,qy+14*zoom); ctx.stroke();
+  ctx.fillStyle = '#ffb020';
+  ctx.beginPath(); ctx.arc(qx,qy,4.5,0,Math.PI*2); ctx.fill();
+
+  ctx.font = '13px "IBM Plex Mono", monospace';
+  ctx.fillStyle = '#ffb020';
+  ctx.fillText('NESG-TR4102', qx+100*zoom, qy+4);
+  ctx.fillStyle = 'rgba(154,164,171,0.85)';
+  ctx.font = '11px "IBM Plex Mono", monospace';
+  ctx.fillText('α/β hydrolase region · 1,204 neighbours · 6.7% deposited', qx+100*zoom, qy+21);
+
+  document.getElementById('scale').innerHTML =
+    '331,472 targets · 2000–2017 · zoom ×'+zoom.toFixed(1)+'<br>drag to pan · scroll to zoom';
+}
+document.getElementById('zIn').addEventListener('click',()=>{ zoom=Math.min(6,zoom*1.4); drawField(); });
+document.getElementById('zOut').addEventListener('click',()=>{ zoom=Math.max(0.6,zoom/1.4); drawField(); });
+document.getElementById('zRst').addEventListener('click',()=>{ zoom=1;panX=0;panY=0; drawField(); });
+cv.addEventListener('wheel',e=>{
+  e.preventDefault();
+  zoom = Math.max(0.6, Math.min(6, zoom * (e.deltaY<0 ? 1.12 : 0.89)));
+  drawField();
+},{passive:false});
+cv.addEventListener('pointerdown',e=>{ drag={x:e.offsetX,y:e.offsetY,px:panX,py:panY}; cv.setPointerCapture(e.pointerId); });
+cv.addEventListener('pointermove',e=>{
+  if(!drag) return;
+  const s = cv.width / cv.getBoundingClientRect().width;
+  panX = drag.px + (e.offsetX-drag.x)*s;
+  panY = drag.py + (e.offsetY-drag.y)*s;
+  drawField();
+});
+['pointerup','pointercancel','pointerleave'].forEach(ev=>cv.addEventListener(ev,()=>{drag=null;}));
+
+/* ============================================================
+   7. INIT
+   ============================================================ */
+syncControls();
+syncFlags();
+render();
+</script>
+</body>
+</html>

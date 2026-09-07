@@ -1,0 +1,12 @@
+# FAFFAbout Phase 1 dependencies (archive parsing and query layer).
+# Phases 2 to 4 add their own pins below as they land.
+lxml>=5.2              # streaming iterparse over tt.xml.gz (never DOM-parse it)
+pyarrow>=16.0          # Parquet writer, 50k-row groups
+duckdb>=1.0            # analytical query layer over the Parquet directory
+pandas>=2.2            # small in-memory tables (status enumerations, reports)
+openpyxl>=3.1          # TargetTrack status-enumeration spreadsheet (.xlsx)
+xlrd>=2.0              # ... or legacy .xls, whichever the tarball carries
+pyyaml>=6.0            # config/features.yaml, config/train_config.yaml
+requests>=2.31         # Zenodo record metadata + download
+tqdm>=4.66             # progress bars on the multi-GB stream
+pytest>=8.0            # tests/
