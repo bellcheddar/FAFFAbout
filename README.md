@@ -2,7 +2,7 @@
 
 > **Fine-tuned Attrition Forecasting From Archives: know where your protein is likely to die before you order the gene.**
 
-![python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white) ![lxml](https://img.shields.io/badge/lxml-6.1-467FF7) ![pyarrow](https://img.shields.io/badge/pyarrow-25.0-467FF7) ![duckdb](https://img.shields.io/badge/duckdb-1.5-FFF000?logo=duckdb&logoColor=black) ![pandas](https://img.shields.io/badge/pandas-3.0-150458?logo=pandas&logoColor=white) ![mmseqs2](https://img.shields.io/badge/MMseqs2-18-00897B) ![targets](https://img.shields.io/badge/targets-335%2C771-467FF7) ![status events](https://img.shields.io/badge/status%20events-3.78M-467FF7) ![clusters](https://img.shields.io/badge/clusters%20(30%25%20id)-88%2C452-467FF7) ![tests](https://img.shields.io/badge/pytest-116%20passing-00897B) ![data](https://img.shields.io/badge/data-PSI%20TargetTrack%20%C2%B7%20CC--BY--SA--4.0-9b51e0) ![phase 1](https://img.shields.io/badge/phase%201-complete-fcb900) ![censored](https://img.shields.io/badge/censored-19.03%25-9b51e0) ![phase 2](https://img.shields.io/badge/phase%202-complete-fcb900) ![lightgbm](https://img.shields.io/badge/LightGBM-4.7-00897B) [![MLX-LM](https://img.shields.io/badge/MLX--LM-Apple%20Silicon-000000?logo=apple&logoColor=white)](https://github.com/ml-explore/mlx-lm) ![author](https://img.shields.io/badge/author-Marc%20C.%20Deller%2C%20D.Phil.-1C244B)
+![python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white) ![lxml](https://img.shields.io/badge/lxml-6.1-467FF7) ![pyarrow](https://img.shields.io/badge/pyarrow-25.0-467FF7) ![duckdb](https://img.shields.io/badge/duckdb-1.5-FFF000?logo=duckdb&logoColor=black) ![pandas](https://img.shields.io/badge/pandas-3.0-150458?logo=pandas&logoColor=white) ![mmseqs2](https://img.shields.io/badge/MMseqs2-18-00897B) ![targets](https://img.shields.io/badge/targets-335%2C771-467FF7) ![status events](https://img.shields.io/badge/status%20events-3.78M-467FF7) ![clusters](https://img.shields.io/badge/clusters%20(30%25%20id)-88%2C452-467FF7) ![tests](https://img.shields.io/badge/pytest-116%20passing-00897B) ![data](https://img.shields.io/badge/data-PSI%20TargetTrack%20%C2%B7%20CC--BY--SA--4.0-9b51e0) ![phase 1](https://img.shields.io/badge/phase%201-complete-fcb900) ![censored](https://img.shields.io/badge/censored-19.03%25-9b51e0) ![phase 2](https://img.shields.io/badge/phase%202-complete-fcb900) ![lightgbm](https://img.shields.io/badge/LightGBM-4.7-00897B) ![mlx-lm](https://img.shields.io/badge/mlx--lm-0.31-000000?logo=apple&logoColor=white) [![MLX-LM](https://img.shields.io/badge/MLX--LM-Apple%20Silicon-000000?logo=apple&logoColor=white)](https://github.com/ml-explore/mlx-lm) ![author](https://img.shields.io/badge/author-Marc%20C.%20Deller%2C%20D.Phil.-1C244B)
 
 <table>
 <tr>
@@ -259,6 +259,21 @@ The last row is kept as a **negative control** and asserted by a test, because a
 
 Archive-context features deserve one caveat. Under the cluster split they are structurally absent at test time: whole clusters are held out, so 0.0% of test targets have a precedent against 91.9% of training targets. The temporal split is the one where precedent is both available (82.3% of test targets) and honest, since a 2014 target may have pre-2014 precedents in its own cluster.
 
+## 🧪 Evaluation
+
+`eval/eval_calibration.py` scores the GBM today and a served adapter with `--llm-endpoint`, reporting Brier, 10-bin expected calibration error, per-gate AUROC, bottleneck top-1 accuracy and the GBM delta.
+
+| Split | Brier | ECE | AUROC | Bottleneck top-1 |
+|---|---|---|---|---|
+| Cluster-held-out | 0.144 | 0.023 | 0.857 | 0.768 |
+| Temporal | 0.107 | 0.055 | 0.909 | 0.649 |
+
+The temporal reliability table shows the honest shape of forecasting the future: the model is systematically under-confident in the upper bins (predicting 0.75 where 0.86 is observed) and over-confident in the lower ones. Expected calibration error more than doubles against the cluster split, which is what a real 2014-onwards deployment would have felt.
+
+`eval/eval_generative.py` has two halves. The automatic half fails the run outright on a **hallucinated identifier**, a target id or PDB code in a completion that was not in its own prompt, since that means facts leaked into the weights that should have stayed in retrieval. Building the identifier pattern from the archive's 41 real centre names rather than a general one matters: `[A-Z][A-Za-z0-9]+-...` also matches ordinary hyphenated English, and reported "Gate-by" out of "Gate-by-gate outlook" as a hallucination in 10 of 40 cases. The manual half writes a 40-case rubric form for a domain expert, which is the acceptance test and is not automatable.
+
+Two structural points the harness had to be built around. Cluster-held-out prompts carry **no precedent table at all**, because whole clusters are held out, so the citation and censoring checks score zero there for a structural reason rather than a model one. The generative eval therefore grades the **temporal** held-out set, where 1,433 of 2,000 records carry precedents and 1,265 carry censored context. And sampling from the head of a corpus written in token-length order systematically picks the shortest, least-context records: that drew 2 cases with censored context where the full set has 1,265.
+
 ## 🎓 Roadmap and the science
 
 The full plan is in `PROJECT_PLAN.md` and the specification in `faffabout_build_spec_v1.md`. The parts that matter most:
@@ -285,9 +300,12 @@ The full plan is in `PROJECT_PLAN.md` and the specification in `faffabout_build_
 - [x] **Phase 2: SFT corpus.** `scripts/07_build_sft.py`: 120,000 training records in the specification's five-task mix, 2,000 each for validation and test drawn from held-out clusters, 10 paraphrases per template, sorted by token length for MLX padding
 - [x] **Phase 3: GBM baseline.** `baseline/gbm_baseline.py`: LightGBM per gate and on the terminal outcome, across the cluster, temporal and declared-protocol configurations, with a leak demonstration as a negative control. Mean AUROC 0.839 cluster-held-out, terminal 0.866
 - [x] **Phase 3: feature provenance.** `config/features.yaml` separates prediction-time from post-hoc features, after the first baseline scored a meaningless 0.985
-- [ ] **Phase 3: disk and licence.** The model pipeline needs roughly 40 GB and 17 GB is free; Llama 3.1 is a gated repository needing the Meta community licence accepted
-- [ ] **Phase 3: LoRA.** Llama-3.1-8B-Instruct 8-bit, all 32 layers, rank 16, `mask_prompt`, W&B; optional DPO on L3 pairs; fuse with `--de-quantize`
-- [ ] **Phase 3: eval.** Brier, 10-bin ECE, per-gate AUROC, bottleneck top-1, GBM delta on all three splits; 40 graded narratives with zero hallucinated ids
+- [x] **Phase 3: licence and model source.** `meta-llama/Llama-3.1-8B-Instruct` is already accessible with the existing HuggingFace token, and `mlx-community/Meta-Llama-3.1-8B-Instruct-8bit` is the same model pre-quantised, ungated, at 8.54 GB instead of 25 GB for a local convert
+- [ ] **Phase 3: LoRA.** Config, launcher and preflight are written and validated against the installed mlx-lm. Blocked on a reboot: 1.8 GB of swap is in use and the machine has been up five days
+- [ ] **Phase 3: DPO.** Optional preference stage on the L3 pairs if the SFT model is overconfident
+- [ ] **Phase 3: fuse.** `--de-quantize` needs roughly 16 GB more than the 15 GB free; serving from base plus adapter avoids it
+- [x] **Phase 3: eval harness.** `eval/eval_calibration.py` (Brier, 10-bin ECE, per-gate AUROC, bottleneck top-1, GBM delta, reliability tables) and `eval/eval_generative.py` (automatic hallucinated-identifier check plus a 40-case rubric form). Both run against the GBM today and against a served adapter with `--llm-endpoint`
+- [ ] **Phase 3: grade the narratives.** 40 cases in `eval/generative_review.md`, once a model exists
 - [ ] **Phase 4: serve.** Flask app with the Pipeline Rig front end, `POST /predict` contract, censoring visible at all times, live at faffabout.mdeller.com and listed on the mdeller.com launcher
 - [ ] **Licence.** Choose the code licence (the data is CC-BY-SA-4.0; Llama 3.1 has its own community licence to check before any model redistribution)
 

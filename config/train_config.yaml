@@ -1,0 +1,68 @@
+# FAFFAbout LoRA fine-tune (MLX-LM native)
+#
+#   .venv/bin/python -m mlx_lm lora --config config/train_config.yaml --train
+#
+# Field names drift between mlx-lm versions. Before the first run:
+#   curl -O https://raw.githubusercontent.com/ml-explore/mlx-lm/main/mlx_lm/examples/lora_config.yaml
+# and reconcile keys against the installed version. scripts/08_train.py does this check
+# and refuses to launch on a mismatch.
+
+# --- Model -------------------------------------------------------------------------
+# The spec quantises meta-llama/Llama-3.1-8B-Instruct locally with mlx_lm.convert. That
+# repository IS accessible with Marc's HuggingFace token (gated=manual, already granted),
+# but the round trip costs 16 GB for the original plus 9 GB for the output.
+# mlx-community publishes the same model already converted to 8-bit, ungated, at 8.54 GB,
+# which is the same artefact for a third of the disk. Use it unless a local convert is
+# specifically wanted.
+model: "mlx-community/Meta-Llama-3.1-8B-Instruct-8bit"
+# model: "./models/Llama-3.1-8B-Instruct-8bit"   # local convert, if disk allows
+
+train: true
+fine_tune_type: "lora"
+
+# --- Data --------------------------------------------------------------------------
+# data/sft/{train,valid,test}.jsonl, chat format, sorted by token length so MLX's
+# pad-to-longest-in-batch wastes as little as possible.
+data: "data/sft"
+
+# --- Adapter output ----------------------------------------------------------------
+# mlx-lm takes the W&B run name from the basename of this path and offers no override,
+# so the directory IS the run name.
+adapter_path: "adapters/faffabout-llama31-8b-round01"
+
+# --- LoRA --------------------------------------------------------------------------
+num_layers: 32                  # all layers: this task is far from the base distribution.
+                                # The default of 16 silently halves capacity, so check
+                                # adapter_config.json after the run rather than the command.
+lora_parameters:
+  keys: ["self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.o_proj",
+         "mlp.gate_proj", "mlp.up_proj", "mlp.down_proj"]
+  rank: 16
+  scale: 16.0                   # MLX scale, not identical to HF alpha
+  dropout: 0.05                 # nonzero: the SFT set has templated structure
+
+# --- Optimisation ------------------------------------------------------------------
+# 120,000 training records at batch_size 4 is 30,000 steps per epoch, so 6,000 iterations
+# is roughly one fifth of an epoch. Raise iters or cut --max-records for a full pass.
+iters: 6000
+batch_size: 4
+learning_rate: 1.0e-4           # half the ChemSage rate: 32 adapted layers, not 16
+lr_schedule:
+  name: cosine_decay
+  warmup: 200
+  arguments: [1.0e-4, 6000, 1.0e-6]
+max_seq_length: 2048            # the corpus tops out near 700 tokens, so nothing truncates
+grad_checkpoint: true           # never disable this to save memory: it silently corrupts
+                                # output on this M1 rather than erroring
+mask_prompt: true               # essential here: prompts carry long precedent tables and
+                                # completions are short, so unmasked loss would mostly
+                                # teach the model to echo its own context
+seed: 42
+
+# --- Reporting ---------------------------------------------------------------------
+# steps_per_eval must be a whole MULTIPLE of steps_per_report, never equal to it:
+# equal cadences produce a handful of points across the whole run.
+steps_per_report: 10
+steps_per_eval: 50
+val_batches: 40
+save_every: 500

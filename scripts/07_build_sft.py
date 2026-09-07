@@ -240,12 +240,33 @@ def gate_judgement(r: dict, rng: random.Random, priors: dict[int, float]) -> dic
             + (f"\n\nPrecedents:\n{fmt_precedents(r['precedents'])}" if r.get("precedents") else ""))
     p = calibrated_p(r, priors)
     reason = build_reason(r, p >= 0.5)
-    assistant = (f"Probability of getting from {LADDER[g]} to {LADDER[g+1]}: {p:.2f}\n{reason}")
+    assistant = (f"Probability of getting from {LADDER[g]} to {LADDER[g+1]}: {p:.2f}\n"
+                 f"{reason}{censoring_caveat(r)}")
     return {"task": "gate_judgement", "target_id": r["target_id"], "gate": g,
             "label": r.get("label"), "p": round(p, 4), "messages": [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": user},
         {"role": "assistant", "content": assistant}]}
+
+
+def censoring_caveat(r: dict) -> str:
+    """Spec rule 1: censored is excluded from the loss, present in context, and FLAGGED IN
+    OUTPUT. Only the ranking task said so, and the generative eval scored 0 of 19 cases
+    that had a censored precedent in context."""
+    cens = [p for p in (r.get("precedents") or []) if p.get("censored")]
+    frac = r.get("cluster_censored_frac") or 0
+    if cens:
+        n, tot = len(cens), len(r.get("precedents") or [])
+        return (f" Note that {n} of {tot} precedents here are censored: their files closed "
+                "when the centre stopped reporting, so they are evidence of nothing either "
+                "way and the real base is thinner than the count suggests.")
+    if frac >= 0.05:
+        # a censored share of the cluster is context worth commenting on even when no
+        # censored row made it into the eight precedents shown
+        return (f" Bear in mind that {frac:.0%} of this cluster's records are censored at "
+                "centre closure rather than by any experimental result, so the effective "
+                "evidence is thinner than the counts suggest.")
+    return ""
 
 
 def build_reason(r: dict, cleared: bool) -> str:
@@ -300,7 +321,8 @@ def pipeline_forecast(r: dict, rng: random.Random) -> dict:
             worst, bottleneck = cond, g
     assistant = ("Gate-by-gate outlook:\n" + "\n".join(lines) +
                  f"\n\nPredicted bottleneck: {LADDER[bottleneck]} -> {LADDER[bottleneck+1]}"
-                 f" ({GATE_DESC[bottleneck]}).\n{build_reason(r, reached >= 5)}")
+                 f" ({GATE_DESC[bottleneck]}).\n{build_reason(r, reached >= 5)}"
+                 f"{censoring_caveat(r)}")
     return {"task": "pipeline_forecast", "messages": [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": user},
@@ -311,7 +333,9 @@ def orthologue_ranking(group: list[dict], rng: random.Random) -> dict | None:
     if len(group) < 3:
         return None
     shown = group[:6]
-    order = sorted(shown, key=lambda p: -(p["max_stage"] or 0))
+    # censored records carry no information about tractability, so they sort last on
+    # evidence rather than on the stage they happen to have reached
+    order = sorted(shown, key=lambda p: (bool(p.get("censored")), -(p["max_stage"] or 0)))
     q = rng.choice(PARAPHRASES["orthologue_ranking"])
     rows = fmt_precedents(shown)
     user = (f"{q}\n\nCandidates from the same 30% identity cluster:\n{rows}\n\n"
@@ -362,7 +386,8 @@ def construct_recommend(r: dict, rng: random.Random) -> dict | None:
         parts.append(f"Tag: {r['tag']}" + (f", cleaved with {r['protease']}" if r.get("protease") else "") + ".")
     if (r.get("tm_helices") or 0) >= 3:
         parts.append("This is predicted polytopic, so expect detergent screening to dominate the effort.")
-    assistant = "\n".join(parts) + "\n" + build_reason(r, (r.get("max_stage") or 0) >= 4)
+    assistant = ("\n".join(parts) + "\n" + build_reason(r, (r.get("max_stage") or 0) >= 4)
+                 + censoring_caveat(r))
     return {"task": "construct_recommend", "messages": [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": user},
@@ -375,7 +400,8 @@ def failure_attribution(r: dict, rng: random.Random) -> dict | None:
     q = rng.choice(PARAPHRASES["failure_attribution"])
     user = (f"{q}\n\nTarget features:\n{fmt_features(r)}\n\nArchive evidence:\n{fmt_evidence(r)}")
     assistant = (build_reason(r, False) + " In this archive it stopped at "
-                 f"{LADDER[r['max_stage']]}, which is consistent with that reading.")
+                 f"{LADDER[r['max_stage']]}, which is consistent with that reading."
+                 + censoring_caveat(r))
     return {"task": "failure_attribution", "messages": [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": user},
@@ -404,7 +430,7 @@ def main() -> None:
     print("loading L1 with features and context ...")
     df = con.execute("""
         SELECT l.target_id, l.centre, l.gate, l.label, l.in_loss, l.max_stage,
-               s.split_cluster, f.organism, f.superkingdom, f.seq_len, f.pi, f.gravy,
+               s.split_cluster, s.split_temporal, f.organism, f.superkingdom, f.seq_len, f.pi, f.gravy,
                f.net_charge_ph7, f.cys_count, f.tm_helices, f.signal_peptide,
                f.disorder_frac, f.disorder_nterm, f.disorder_cterm, f.low_complexity_frac,
                f.protein_types, f.target_construct_type, f.host, f.tag, f.protease,
@@ -463,12 +489,16 @@ def main() -> None:
 
     # --- precedent lookup ---------------------------------------------------------------
     print("precedent tables ...")
+    # Censored targets ARE included here, flagged. Spec rule 1: censored is excluded from
+    # the loss but PRESENT IN CONTEXT and flagged in output. Drawing precedents from
+    # labels_l2, which drops censored targets, meant no prompt ever contained one, so the
+    # model could never learn to see and discount them.
     prec = con.execute("""
-        SELECT s.cluster_id, l.target_id, l.centre, f.organism, l.max_stage, c.censored
-        FROM splits s JOIN labels_l2 l USING (target_id)
+        SELECT s.cluster_id, c.target_id, c.centre, f.organism, c.max_stage, c.censored
+        FROM splits s JOIN censoring c USING (target_id)
         LEFT JOIN features f USING (target_id)
-        LEFT JOIN censoring c USING (target_id)
         WHERE s.split_cluster = 'train' AND s.cluster_id IS NOT NULL
+          AND c.max_stage IS NOT NULL
     """).df()
     by_cluster: dict[int, list[dict]] = {}
     for rec in prec.to_dict("records"):
@@ -534,22 +564,72 @@ def main() -> None:
     rng.shuffle(val_rows); rng.shuffle(test_rows)
 
     def eval_records(src, n):
-        out = []
+        """The held-out sets span every task type, in the same mix as training.
+
+        Built from gate_judgement alone, the generative eval's "cited a real precedent"
+        check scored 0/40 by construction, because a gate judgement never names one.
+        """
+        out: list[dict] = []
+        seen_rank_eval: set = set()
+        quota_eval = {k: max(1, int(n * v)) for k, v in mix.items()}
+        made_eval = dict.fromkeys(mix, 0)
         for r in src:
             if len(out) >= n:
                 break
             cid = r.get("cluster_id")
             r["precedents"] = [p for p in by_cluster.get(cid, []) if p["target_id"] != r["target_id"]][:8] if cid else []
             r["gate_rates"] = gate_rates.get(r["target_id"], {})
-            rec = gate_judgement(r, rng, priors)
-            if rec:
-                out.append(rec)
+            for name, fn in (("gate_judgement", lambda: gate_judgement(r, rng, priors)),
+                             ("pipeline_forecast", lambda: pipeline_forecast(r, rng)),
+                             ("construct_recommend", lambda: construct_recommend(r, rng)),
+                             ("failure_attribution", lambda: failure_attribution(r, rng))):
+                if made_eval[name] < quota_eval[name] and len(out) < n:
+                    rec = fn()
+                    if rec:
+                        out.append(rec); made_eval[name] += 1
+            if (made_eval["orthologue_ranking"] < quota_eval["orthologue_ranking"]
+                    and cid and cid not in seen_rank_eval and len(out) < n):
+                group = by_cluster.get(cid, [])
+                if len(group) >= 3:
+                    seen_rank_eval.add(cid)
+                    rec = orthologue_ranking(group, rng)
+                    if rec:
+                        out.append(rec); made_eval["orthologue_ranking"] += 1
         return out
 
     valid = eval_records(val_rows, 2000)
     test = eval_records(test_rows, 2000)
 
-    for name, recs in (("train", records), ("valid", valid), ("test", test)):
+    # A cluster-held-out test target has NO precedents by construction: whole clusters are
+    # held out, so the training pool contains none of its relatives. That is correct for
+    # measuring generalisation, but it means a cluster-test prompt never carries a
+    # precedent table, and the generative eval's "cited a real precedent" and "flagged
+    # censoring" checks then score 0/40 for a structural reason rather than a model one.
+    #
+    # The temporal split is where precedent is both present (82.3% of its test targets)
+    # and honest: a 2014 target may have pre-2014 relatives. This second held-out set is
+    # what eval_generative.py grades.
+    temporal_prec: dict[int, list[dict]] = {}
+    for rec in con.execute("""
+        SELECT s.cluster_id, c.target_id, c.centre, f.organism, c.max_stage, c.censored
+        FROM splits s JOIN censoring c USING (target_id)
+        LEFT JOIN features f USING (target_id)
+        WHERE s.split_temporal = 'train' AND s.cluster_id IS NOT NULL AND c.max_stage IS NOT NULL
+    """).df().to_dict("records"):
+        temporal_prec.setdefault(rec["cluster_id"], []).append(rec)
+
+    temporal_rows = df[df.split_temporal == "test"].to_dict("records") if "split_temporal" in df else []
+    rng.shuffle(temporal_rows)
+    saved_by_cluster = by_cluster
+    by_cluster = temporal_prec
+    test_temporal = eval_records(temporal_rows, 2000)
+    by_cluster = saved_by_cluster
+    with_prec = sum(1 for r in test_temporal if "Precedents:" in r["messages"][1]["content"])
+    print(f"  temporal held-out: {len(test_temporal):,} records, "
+          f"{with_prec:,} carrying a precedent table")
+
+    for name, recs in (("train", records), ("valid", valid), ("test", test),
+                       ("test_temporal", test_temporal)):
         # sort by length: MLX pads to the longest item in a batch
         recs.sort(key=approx_tokens)
         p = OUT / f"{name}.jsonl"
