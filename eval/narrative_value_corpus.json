@@ -1,0 +1,15 @@
+{
+  "source": "corpus",
+  "n": 24,
+  "template_echo_mean": 0.5536718132479098,
+  "template_echo_max": 0.8809523809523809,
+  "responsiveness_mean_pairwise": 0.13819760148821325,
+  "names_a_wall": 24,
+  "bottleneck_top1": 1.0,
+  "warnings": [],
+  "samples": [
+    "Gate-by-gate outlook:\n  selected -> cloned: 0.64 conditional, 0.64 cumulative\n  cloned -> expressed: 0.44 conditional, 0.29 cumulative\n  expressed -> soluble: 0.75 conditional, 0.21 cumulative\n  soluble -> purified: 0.33 conditional, 0.07 cumulative\n  purified -> crystallised: 0.05 conditional, 0.00 cumulative\n  crystallised -> diffracting: 0.35 conditional, 0.00 cumulative\n  diffracting -> structure: 0.35 conditional, 0.00 cumulative\n  structure -> deposited: 0.35 conditional, 0.00 cumulative\n\nPredicted bottleneck: purified -> crystallised (obtaining crystals).\nThe precedent in this cluster is discouraging, and this target carries a predicted membrane anchor. Note that 1 of 8 precedents here are censored: their files closed when the centre stopped reporting, so they are evidence of nothing either way and the real base is thinner than the count suggests.",
+    "Gate-by-gate outlook:\n  selected -> cloned: 0.93 conditional, 0.93 cumulative\n  cloned -> expressed: 0.77 conditional, 0.71 cumulative\n  expressed -> soluble: 0.97 conditional, 0.69 cumulative\n  soluble -> purified: 0.50 conditional, 0.35 cumulative\n  purified -> crystallised: 0.40 conditional, 0.14 cumulative\n  crystallised -> diffracting: 0.97 conditional, 0.13 cumulative\n  diffracting -> structure: 0.97 conditional, 0.13 cumulative\n  structure -> deposited: 0.97 conditional, 0.13 cumulative\n\nPredicted bottleneck: purified -> crystallised (obtaining crystals).\nThe precedent in this cluster is discouraging.",
+    "Gate-by-gate outlook:\n  selected -> cloned: 0.97 conditional, 0.97 cumulative\n  cloned -> expressed: 0.50 conditional, 0.48 cumulative\n  expressed -> soluble: 0.97 conditional, 0.47 cumulative\n  soluble -> purified: 0.50 conditional, 0.24 cumulative\n  purified -> crystallised: 0.97 conditional, 0.23 cumulative\n  crystallised -> diffracting: 0.05 conditional, 0.01 cumulative\n  diffracting -> structure: 0.35 conditional, 0.00 cumulative\n  structure -> deposited: 0.35 conditional, 0.00 cumulative\n\nPredicted bottleneck: crystallised -> diffracting (obtaining useful diffraction).\nThere is little precedent here, and the intrinsic properties are unhelpful."
+  ]
+}

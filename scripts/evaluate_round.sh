@@ -92,7 +92,8 @@ GEN_RC=${PIPESTATUS[0]}
 # --- 3. is the prose worth anything? ----------------------------------------------------
 echo
 echo "--- 3/3 narrative value, against the corpus floor ---"
-$PY eval/eval_narrative_value.py --llm-endpoint "$FAFFABOUT_LLM" --llm-model "$MID" --n 24 2>&1 | tail -16
+$PY eval/eval_narrative_value.py --llm-endpoint "$FAFFABOUT_LLM" --llm-model "$MID" --n 24 \
+    --label "$(basename "$ADAPTER")" 2>&1 | tail -24
 
 # --- summary ----------------------------------------------------------------------------
 echo
@@ -119,14 +120,24 @@ if cal.exists():
                    "the GBM is better calibrated, as expected; the LLM must earn its place on the prose"))
 if nv.exists():
     v = json.loads(nv.read_text())
+    # The floor is read, never pasted: a model run must not be compared against a number
+    # that has drifted away from the measurement it claims to quote.
+    fp = root / "eval" / "narrative_value_corpus.json"
+    fl = json.loads(fp.read_text()) if fp.exists() else None
+    fe = fl["template_echo_mean"] if fl else None
+    fr = fl["responsiveness_mean_pairwise"] if fl else None
     print()
-    print(f"  narrative: template echo {v['template_echo_mean']:.3f} (corpus floor 0.554)")
-    print(f"             responsiveness {v['responsiveness_mean_pairwise']:.3f} (corpus floor 0.138)")
+    print(f"  narrative: template echo {v['template_echo_mean']:.3f}" +
+          (f" (corpus floor {fe:.3f})" if fe is not None else " (no floor measured)"))
+    print(f"             responsiveness {v['responsiveness_mean_pairwise']:.3f}" +
+          (f" (corpus floor {fr:.3f})" if fr is not None else ""))
     b = v.get("bottleneck_top1")
     print(f"             bottleneck top-1 {b:.2f}" if b is not None else "             bottleneck top-1 n/a")
-    if v["template_echo_mean"] > 0.554:
-        print("  -> ECHO ABOVE THE FLOOR: the model recites its training completions more")
-        print("     closely than the corpus resembles itself. That is decoration, not reasoning.")
+    if fe is not None and v["template_echo_mean"] >= fe:
+        print("  -> ECHO AT OR ABOVE THE FLOOR: the model recites its training completions as")
+        print("     closely as the corpus resembles itself. That is decoration, not reasoning.")
+    elif fe is None:
+        print("  -> no floor on disk: run eval_narrative_value.py --dry-run --label corpus")
     if v["responsiveness_mean_pairwise"] > 0.30:
         print("  -> narratives for different targets resemble each other: it is ignoring its input")
     for w in v.get("warnings", []):

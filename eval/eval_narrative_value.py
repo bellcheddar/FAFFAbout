@@ -112,7 +112,10 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--dry-run", action="store_true",
                     help="score the corpus's own completions: the floor a model must beat")
+    ap.add_argument("--label", default=None,
+                    help="names the output file, so a model run cannot overwrite the floor")
     args = ap.parse_args()
+    label = args.label or ("corpus" if args.dry_run else "model")
 
     rng = random.Random(args.seed)
     train = [json.loads(l) for l in (SFT / "train.jsonl").open()]
@@ -173,7 +176,22 @@ def main() -> None:
     print(f"  bottleneck top-1 {agreed}/{comparable} agree with the held-out answer"
           if comparable else "  bottleneck top-1 n/a")
 
+    # The floor is whatever the corpus scored, not a number pasted into a shell script.
+    floor = OUT / "narrative_value_corpus.json"
+    fl = json.loads(floor.read_text()) if floor.exists() and label != "corpus" else None
+    if fl:
+        de = sum(echo) / len(echo) - fl["template_echo_mean"]
+        dr = resp - fl["responsiveness_mean_pairwise"]
+        print(f"\n  against the corpus floor (n={fl['n']}):")
+        print(f"    echo           {de:+.3f}  " +
+              ("AT OR ABOVE THE FLOOR: recitation" if de >= 0 else "below the floor"))
+        print(f"    responsiveness {dr:+.3f}  " +
+              ("less varied than the corpus itself" if dr >= 0 else "more varied than the corpus"))
+
     verdict = []
+    if fl and sum(echo) / len(echo) >= fl["template_echo_mean"]:
+        verdict.append("narratives match training completions at least as closely as the corpus "
+                       "matches itself: the template has been memorised")
     if resp > 0.60:
         verdict.append("narratives barely differ between targets: the model is not using its input")
     if sum(echo) / len(echo) > 0.70:
@@ -190,15 +208,19 @@ def main() -> None:
               "  learned to recite rather than to reason.")
 
     OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / "narrative_value.json").write_text(json.dumps({
+    blob = json.dumps({
         "source": model if args.llm_endpoint else "corpus",
         "n": len(texts), "template_echo_mean": sum(echo) / len(echo),
         "template_echo_max": max(echo), "responsiveness_mean_pairwise": resp,
         "names_a_wall": grounded, "bottleneck_top1": (agreed / comparable) if comparable else None,
         "warnings": verdict,
         "samples": texts[:3],
-    }, indent=2))
-    print(f"\nwrote {OUT / 'narrative_value.json'}")
+    }, indent=2)
+    # Two files on purpose: the labelled one is permanent, so a later model run cannot
+    # destroy the floor it is being judged against.
+    (OUT / f"narrative_value_{label}.json").write_text(blob)
+    (OUT / "narrative_value.json").write_text(blob)
+    print(f"\nwrote {OUT / f'narrative_value_{label}.json'} (and narrative_value.json)")
 
 
 if __name__ == "__main__":
