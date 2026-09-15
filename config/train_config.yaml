@@ -59,7 +59,12 @@ mask_prompt: true               # essential here: prompts carry long precedent t
                                 # teach the model to echo its own context
 seed: 42
 
-# --- Reporting ---------------------------------------------------------------------
+# --- Reporting --------------------------------------------------------------------
+# mlx-lm 0.31 takes report_to/project_name, NOT --wandb. Both are CONFIG_DEFAULTS keys, so
+# putting them here means scripts/08_train.py's key check covers them; as a command-line
+# flag the drift was invisible until the launch failed.
+report_to: wandb
+project_name: faffabout
 # steps_per_eval must be a whole MULTIPLE of steps_per_report, never equal to it:
 # equal cadences produce a handful of points across the whole run.
 steps_per_report: 10

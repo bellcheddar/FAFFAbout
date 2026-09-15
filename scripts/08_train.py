@@ -72,6 +72,23 @@ def check_config_keys(cfg: dict) -> list[str]:
     return sorted(k for k in cfg if k not in known)
 
 
+def check_cli_flags(cmd: list[str]) -> list[str]:
+    """Flags we construct, checked against the installed parser.
+
+    check_config_keys only covers the YAML. `--wandb` was built here in Python, so it
+    sailed past every check and the run died at launch: mlx-lm 0.31 wants report_to and
+    project_name instead.
+    """
+    try:
+        help_text = subprocess.run(cmd[:4] + ["--help"], capture_output=True,
+                                   text=True, timeout=120).stdout
+    except Exception:  # noqa: BLE001
+        return []
+    if not help_text:
+        return []
+    return [f for f in cmd if f.startswith("--") and f not in help_text]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--iters", type=int, default=None, help="override; use the REMAINING budget on a resume")
@@ -115,8 +132,12 @@ def main() -> None:
            "--adapter-path", str(adapter_path), "--iters", str(iters)]
     if args.resume:
         cmd += ["--resume-adapter-file", str(Path(args.resume) / "adapters.safetensors")]
-    if not args.no_wandb:
-        cmd += ["--wandb", WANDB_PROJECT]
+    # W&B is configured in the YAML (report_to / project_name), not as a flag.
+
+    unknown_flags = check_cli_flags(cmd)
+    if unknown_flags:
+        sys.exit(f"mlx-lm does not accept {unknown_flags}. Flag names drift between "
+                 "versions; reconcile against `python -m mlx_lm lora --help`.")
 
     print("\n" + " ".join(cmd))
     if args.dry_run:
