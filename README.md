@@ -2,7 +2,7 @@
 
 > **Fine-tuned Attrition Forecasting From Archives: know where your protein is likely to die before you order the gene.**
 
-![python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white) ![lxml](https://img.shields.io/badge/lxml-6.1-467FF7) ![pyarrow](https://img.shields.io/badge/pyarrow-25.0-467FF7) ![duckdb](https://img.shields.io/badge/duckdb-1.5-FFF000?logo=duckdb&logoColor=black) ![pandas](https://img.shields.io/badge/pandas-3.0-150458?logo=pandas&logoColor=white) ![mmseqs2](https://img.shields.io/badge/MMseqs2-18-00897B) ![targets](https://img.shields.io/badge/targets-335%2C771-467FF7) ![status events](https://img.shields.io/badge/status%20events-3.78M-467FF7) ![clusters](https://img.shields.io/badge/clusters%20(30%25%20id)-88%2C452-467FF7) ![tests](https://img.shields.io/badge/pytest-116%20passing-00897B) ![data](https://img.shields.io/badge/data-PSI%20TargetTrack%20%C2%B7%20CC--BY--SA--4.0-9b51e0) ![phase 1](https://img.shields.io/badge/phase%201-complete-fcb900) ![censored](https://img.shields.io/badge/censored-19.03%25-9b51e0) ![phase 2](https://img.shields.io/badge/phase%202-complete-fcb900) ![lightgbm](https://img.shields.io/badge/LightGBM-4.7-00897B) ![mlx-lm](https://img.shields.io/badge/mlx--lm-0.31-000000?logo=apple&logoColor=white) [![MLX-LM](https://img.shields.io/badge/MLX--LM-Apple%20Silicon-000000?logo=apple&logoColor=white)](https://github.com/ml-explore/mlx-lm) ![author](https://img.shields.io/badge/author-Marc%20C.%20Deller%2C%20D.Phil.-1C244B)
+![python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white) ![lxml](https://img.shields.io/badge/lxml-6.1-467FF7) ![pyarrow](https://img.shields.io/badge/pyarrow-25.0-467FF7) ![duckdb](https://img.shields.io/badge/duckdb-1.5-FFF000?logo=duckdb&logoColor=black) ![pandas](https://img.shields.io/badge/pandas-3.0-150458?logo=pandas&logoColor=white) ![mmseqs2](https://img.shields.io/badge/MMseqs2-18-00897B) ![targets](https://img.shields.io/badge/targets-335%2C771-467FF7) ![status events](https://img.shields.io/badge/status%20events-3.78M-467FF7) ![clusters](https://img.shields.io/badge/clusters%20(30%25%20id)-88%2C452-467FF7) ![tests](https://img.shields.io/badge/pytest-137%20passing-00897B) ![data](https://img.shields.io/badge/data-PSI%20TargetTrack%20%C2%B7%20CC--BY--SA--4.0-9b51e0) ![phase 1](https://img.shields.io/badge/phase%201-complete-fcb900) ![censored](https://img.shields.io/badge/censored-19.03%25-9b51e0) ![phase 2](https://img.shields.io/badge/phase%202-complete-fcb900) ![flask](https://img.shields.io/badge/flask-3.1-000000?logo=flask&logoColor=white) ![lightgbm](https://img.shields.io/badge/LightGBM-4.7-00897B) ![mlx-lm](https://img.shields.io/badge/mlx--lm-0.31-000000?logo=apple&logoColor=white) [![MLX-LM](https://img.shields.io/badge/MLX--LM-Apple%20Silicon-000000?logo=apple&logoColor=white)](https://github.com/ml-explore/mlx-lm) ![author](https://img.shields.io/badge/author-Marc%20C.%20Deller%2C%20D.Phil.-1C244B)
 
 <table>
 <tr>
@@ -250,10 +250,10 @@ A subtler one: host, tag and protease are mined from the protocol a trial refere
 
 | Configuration | Features | Mean AUROC | Terminal AUROC |
 |---|---|---|---|
-| Cluster-held-out (headline) | 37 | 0.839 | 0.866 |
-| Temporal, train pre-2014 | 37 | 0.740 | 0.849 |
-| Declared protocol, restricted | 42 | 0.851 | 0.903 |
-| Post-hoc added back (negative control) | 59 | 0.985 | 1.000 |
+| Cluster-held-out (headline) | 37 | 0.839 | 0.867 |
+| Temporal, train pre-2014 | 37 | 0.741 | 0.845 |
+| Declared protocol, restricted | 44 | 0.864 | 0.917 |
+| Post-hoc added back (negative control) | 61 | 0.986 | 1.000 |
 
 The last row is kept as a **negative control** and asserted by a test, because a check that has only ever passed is not a check. The gap between the first row and the last is what the post-hoc block gives away.
 
@@ -306,7 +306,8 @@ The full plan is in `PROJECT_PLAN.md` and the specification in `faffabout_build_
 - [ ] **Phase 3: fuse.** `--de-quantize` needs roughly 16 GB more than the 15 GB free; serving from base plus adapter avoids it
 - [x] **Phase 3: eval harness.** `eval/eval_calibration.py` (Brier, 10-bin ECE, per-gate AUROC, bottleneck top-1, GBM delta, reliability tables) and `eval/eval_generative.py` (automatic hallucinated-identifier check plus a 40-case rubric form). Both run against the GBM today and against a served adapter with `--llm-endpoint`
 - [ ] **Phase 3: grade the narratives.** 40 cases in `eval/generative_review.md`, once a model exists
-- [ ] **Phase 4: serve.** Flask app with the Pipeline Rig front end, `POST /predict` contract, censoring visible at all times, live at faffabout.mdeller.com and listed on the mdeller.com launcher
+- [x] **Phase 4: the application.** `app/resolve.py` (FASTA, UniProt or PDB in one field), `app/retrieve.py` (MMseqs2 over all 300,027 archive sequences in 0.8 s, joined to censoring and outcomes), `app/predict.py` (the forecast), `app/llm.py` (the narrative, and nothing else), `app/server.py` and the Pipeline Rig ported to `app/templates/rig.html`
+- [ ] **Phase 4: deploy.** faffabout.mdeller.com, gunicorn behind nginx, and an entry on the mdeller.com launcher
 - [ ] **Licence.** Choose the code licence (the data is CC-BY-SA-4.0; Llama 3.1 has its own community licence to check before any model redistribution)
 
 ---

@@ -193,6 +193,8 @@ def build_target_features(con: duckdb.DuckDBPyConnection) -> None:
                        max(NULLIF(pt.protease, '')) AS protease,
                        bool_or(pt.selenomethionine) AS selenomethionine,
                        bool_or(pt.autoinduction)    AS autoinduction,
+                       bool_or(pt.cold_shock)       AS cold_shock,
+                       bool_or(pt.iptg)             AS iptg,
                        bool_or(pt.codon_optimised)  AS codon_optimised,
                        bool_or(pt.refolding)        AS refolding,
                        bool_or(pt.detergent)        AS detergent
@@ -206,6 +208,8 @@ def build_target_features(con: duckdb.DuckDBPyConnection) -> None:
                    max(NULLIF(p.protease, ''))                AS protease,
                    coalesce(bool_or(p.selenomethionine), false) AS selenomethionine,
                    coalesce(bool_or(p.autoinduction), false)    AS autoinduction,
+                   coalesce(bool_or(p.cold_shock), false)       AS cold_shock,
+                   coalesce(bool_or(p.iptg), false)             AS iptg,
                    coalesce(bool_or(p.codon_optimised), false)  AS codon_optimised,
                    coalesce(bool_or(p.refolding), false)        AS refolding,
                    coalesce(bool_or(p.detergent), false)        AS detergent,

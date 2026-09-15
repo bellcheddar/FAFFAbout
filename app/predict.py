@@ -33,7 +33,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import features_seq as fs          # noqa: E402
-from taxonomy import Taxonomy      # noqa: E402
+
+# Serving uses the DuckDB-backed lookup, not the in-memory dumps: see app/taxo.py for the
+# measurement that motivated it. The batch class is the fallback for a checkout that has
+# not built the table yet.
+try:
+    import taxo as _taxo
+    _USE_TAXO_TABLE = _taxo.available()
+except Exception:  # noqa: BLE001
+    _USE_TAXO_TABLE = False
+if not _USE_TAXO_TABLE:
+    from taxonomy import Taxonomy  # noqa: E402
 
 MODELS = ROOT / "baseline" / "models"
 N_GATES = 8
@@ -60,18 +70,35 @@ GATE_ACTION = [
 # The levers the interface offers, and the archive value each maps to.
 HOSTS = {"bl21": "ecoli", "rosetta": "ecoli", "arctic": "ecoli",
          "cellfree": "cell_free", "sf9": "insect", "hek": "mammalian", "pichia": "yeast"}
+# `host` collapses to five archive values, so BL21 at 37 C and Arctic Express at 12 C are
+# the SAME value and cannot differ on that feature alone. cold_shock, mined from the same
+# protocol text, is what separates them; without this mapping the two choices returned
+# byte-identical forecasts and the interface's headline counterfactual was a no-op.
+COLD_SHOCK_HOSTS = {"arctic"}
 TAGS = {"his": "his", "mbp": "mbp", "sumo": "sumo", "gst": "gst", "strep": "strep", "none": ""}
 PROTEASES = {"tev": "tev", "3c": "prescission", "thr": "thrombin", "none": ""}
 
-_TAX: Taxonomy | None = None
+_TAX = None
 _BOOSTERS: dict[str, dict] = {}
 _SCHEMAS: dict[str, dict] = {}
 
 
-def taxonomy() -> Taxonomy:
+class _BatchTax:
+    """Adapter so the rest of this module does not care which backend answered."""
+
+    def __init__(self):
+        self._t = Taxonomy()
+
+    def classify(self, taxid=None, organism: str = "") -> dict:
+        return self._t.classify(taxid, organism)
+
+
+def taxonomy():
     global _TAX
+    if _USE_TAXO_TABLE:
+        return _taxo
     if _TAX is None:
-        _TAX = Taxonomy()
+        _TAX = _BatchTax()
     return _TAX
 
 
@@ -104,10 +131,16 @@ class Choices:
     protease: str = ""
     codon_optimised: bool = False
     autoinduction: bool = False
+    iptg: bool = False
 
     @property
     def declares_protocol(self) -> bool:
         return bool(self.host or self.tag or self.protease)
+
+    @property
+    def cold_shock(self) -> bool:
+        """Low-temperature induction, which in this archive is the Arctic Express route."""
+        return self.host in COLD_SHOCK_HOSTS
 
 
 def sequence_features(sequence: str) -> dict:
@@ -164,6 +197,8 @@ def feature_row(sequence: str, organism: str, taxon_id: str, ctx: dict,
         "protease": PROTEASES.get(choices.protease, choices.protease) or None,
         "codon_optimised": choices.codon_optimised,
         "autoinduction": choices.autoinduction,
+        "cold_shock": choices.cold_shock,
+        "iptg": choices.iptg,
     }
     return row
 
@@ -318,7 +353,8 @@ def forecast(resolved, ctx: dict, precedents: list, choices: Choices) -> dict:
 
 
 COUNTERFACTUALS = [
-    ("host", "arctic", "Host to E. coli Arctic Express, 12 C"),
+    ("host", "arctic", "Host to E. coli Arctic Express, 12 C (cold induction)"),
+    ("host", "bl21", "Host to E. coli BL21(DE3), 37 C"),
     ("host", "cellfree", "Host to cell-free"),
     ("host", "sf9", "Host to Sf9 insect cells"),
     ("tag", "mbp", "Tag to MBP fusion"),

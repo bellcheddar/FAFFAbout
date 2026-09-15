@@ -1,0 +1,586 @@
+{#
+  rig.html: the Pipeline Rig, wired to the real forecast.
+
+  Ported from faffabout_rig_v1.html. The chassis, palette and layout are unchanged; what
+  changed is where the numbers come from. The prototype carried invented BASE vectors and
+  hand-written MODS deltas in JavaScript. Here every probability arrives from
+  POST /api/predict, which reads it from the LightGBM boosters and DuckDB. Nothing in this
+  file computes a probability.
+
+  Censored precedents render grey and dashed, never red, and the censoring line is always
+  present rather than hidden behind a caveats array.
+#}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="author" content="Marc C. Deller, D.Phil.">
+<meta name="description" content="FAFFAbout: Fine-tuned Attrition Forecasting From Archives. Predicts where a structural biology target will stall, from the PSI TargetTrack archive.">
+<title>FAFFAbout · Fine-tuned Attrition Forecasting From Archives</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --steel-900:#0d0f11; --steel-800:#101315; --steel-700:#16191c; --steel-600:#191c1f;
+  --steel-500:#22272b; --steel-400:#2c3237; --steel-300:#3a4147;
+  --ink-100:#f2f5f7; --ink-200:#d6dade; --ink-300:#9aa4ab; --ink-400:#6d777e; --ink-500:#4b545a;
+  --lamp-amber:#ffb020; --lamp-amber-dim:#2a1f06;
+  --lamp-green:#4fd18b; --lamp-green-dim:#12281f;
+  --lamp-red:#e07070;   --lamp-red-dim:#2a1414;
+  --lamp-grey:#8a8aa0;  --lamp-grey-dim:#1c1c22;
+  --r:3px;
+}
+*,*::before,*::after{box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;}
+body{margin:0;overflow-x:hidden;background:var(--steel-600);color:var(--ink-200);
+  font-family:'Barlow Condensed',-apple-system,BlinkMacSystemFont,sans-serif;font-size:16px;line-height:1.5;}
+img,canvas,svg{max-width:100%;}
+.mono{font-family:'IBM Plex Mono',monospace;}
+button,select,input,textarea{font-family:inherit;color:inherit;}
+:focus-visible{outline:2px solid var(--lamp-amber);outline-offset:2px;}
+
+.chassis{background:var(--steel-900);border-bottom:1px solid var(--steel-400);position:sticky;top:0;z-index:60;}
+.chassis-in{max-width:1560px;margin:0 auto;padding:11px 20px;display:flex;align-items:center;gap:20px;flex-wrap:wrap;}
+.mark{display:flex;align-items:baseline;gap:10px;flex:0 0 auto;}
+.mark b{font-size:26px;font-weight:700;letter-spacing:.03em;color:var(--ink-100);line-height:1;
+  border-left:4px solid var(--lamp-amber);padding-left:10px;}
+.mark b i{font-style:normal;color:var(--lamp-amber);}
+.mark span{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.13em;color:var(--ink-400);
+  text-transform:uppercase;max-width:230px;line-height:1.35;}
+.rail{flex:1;height:1px;background:repeating-linear-gradient(90deg,var(--steel-400) 0 6px,transparent 6px 12px);min-width:20px;}
+.mode{display:flex;border:1px solid var(--steel-400);border-radius:var(--r);overflow:hidden;background:var(--steel-700);flex:0 0 auto;}
+.mode button{background:none;border:0;padding:8px 17px;font-size:14px;font-weight:600;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--ink-400);cursor:pointer;display:flex;align-items:center;gap:8px;transition:color .15s,background .15s;}
+.mode button + button{border-left:1px solid var(--steel-400);}
+.mode button:hover{color:var(--ink-200);background:var(--steel-500);}
+.mode button.on{background:var(--lamp-amber-dim);color:var(--lamp-amber);}
+.mode button::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--steel-300);}
+.mode button.on::before{background:var(--lamp-amber);box-shadow:0 0 6px var(--lamp-amber);}
+
+.readout{background:var(--steel-800);border-bottom:1px solid var(--steel-400);}
+.readout-in{max-width:1560px;margin:0 auto;padding:13px 20px;display:flex;align-items:center;gap:24px;flex-wrap:wrap;justify-content:space-between;}
+.target-id{font-size:25px;font-weight:600;letter-spacing:.03em;color:var(--ink-100);line-height:1.15;min-width:0;}
+.target-id small{display:block;font-size:13px;letter-spacing:.05em;color:var(--ink-400);font-weight:500;}
+.verdict-chip{font-family:'IBM Plex Mono',monospace;font-size:11.5px;line-height:1.5;color:var(--lamp-amber);
+  border:1px solid #56421a;background:var(--lamp-amber-dim);padding:7px 14px;border-radius:var(--r);letter-spacing:.05em;}
+.verdict-chip b{display:block;font-size:13px;letter-spacing:.09em;}
+.verdict-chip.crys{color:#e0a0e8;border-color:#4a2d52;background:#20122a;}
+.verdict-chip.ok{color:var(--lamp-green);border-color:#255a41;background:var(--lamp-green-dim);}
+.verdict-chip.idle{color:var(--ink-400);border-color:var(--steel-400);background:var(--steel-700);}
+
+.view{display:none;} .view.live{display:block;}
+.deck{max-width:1560px;margin:0 auto;padding:20px;display:grid;grid-template-columns:308px 1fr;gap:20px;align-items:start;}
+.console{background:var(--steel-700);border:1px solid var(--steel-400);border-radius:var(--r);position:sticky;top:112px;}
+.console h2{margin:0;padding:11px 15px;font-size:13px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-300);border-bottom:1px solid var(--steel-400);background:var(--steel-800);display:flex;justify-content:space-between;align-items:center;}
+.console h2 em{font-style:normal;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-500);letter-spacing:.06em;}
+.console-body{padding:15px;}
+.fld{margin-bottom:14px;}
+.fld > label{display:block;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink-400);margin-bottom:5px;}
+.fld select,.fld input[type=text],.fld textarea{width:100%;background:var(--steel-500);border:1px solid var(--steel-400);
+  border-radius:var(--r);padding:7px 9px;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--ink-100);}
+.fld textarea{resize:vertical;min-height:84px;line-height:1.45;letter-spacing:.02em;}
+.fld select:hover,.fld input:hover,.fld textarea:hover{border-color:var(--steel-300);}
+.seg{display:flex;gap:4px;flex-wrap:wrap;}
+.seg button{flex:1;background:var(--steel-500);border:1px solid var(--steel-400);border-radius:var(--r);
+  padding:6px 3px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-300);cursor:pointer;transition:all .14s;white-space:nowrap;}
+.seg button:hover{border-color:var(--steel-300);color:var(--ink-100);}
+.seg button.on{background:var(--lamp-amber-dim);border-color:#56421a;color:var(--lamp-amber);font-weight:600;}
+.sw{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-top:1px solid var(--steel-500);}
+.sw span{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-300);letter-spacing:.04em;}
+.sw button{width:44px;height:21px;border-radius:11px;border:1px solid var(--steel-400);background:var(--steel-500);
+  position:relative;cursor:pointer;padding:0;transition:background .16s,border-color .16s;}
+.sw button::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;
+  background:var(--ink-500);transition:transform .16s,background .16s;}
+.sw button.on{background:var(--lamp-amber-dim);border-color:#56421a;}
+.sw button.on::after{transform:translateX(23px);background:var(--lamp-amber);}
+.go{width:100%;margin-top:6px;background:var(--lamp-amber-dim);border:1px solid #56421a;color:var(--lamp-amber);
+  border-radius:var(--r);padding:10px;font-size:14px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;}
+.go:hover{background:#3a2b08;} .go[disabled]{opacity:.5;cursor:progress;}
+
+.derived{border-top:1px solid var(--steel-400);background:var(--steel-800);padding:13px 15px;border-radius:0 0 var(--r) var(--r);}
+.derived h3{margin:0 0 9px;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-500);}
+.derived dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-family:'IBM Plex Mono',monospace;font-size:11px;}
+.derived dt{color:var(--ink-500);} .derived dd{margin:0;color:var(--ink-200);text-align:right;}
+
+.bay{min-width:0;}
+.flow-shell{background:var(--steel-700);border:1px solid var(--steel-400);border-radius:var(--r);overflow:hidden;}
+.flow-hd{padding:10px 16px;border-bottom:1px solid var(--steel-400);background:var(--steel-800);
+  display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
+.flow-hd h2{margin:0;font-size:13px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-300);}
+.flow-hd em{font-style:normal;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-500);letter-spacing:.06em;}
+.flow{display:flex;padding:26px 16px 20px;overflow-x:auto;scrollbar-width:thin;}
+.gate{flex:0 0 116px;text-align:center;position:relative;cursor:pointer;background:none;border:0;color:inherit;padding:0;}
+.gate::after{content:"";position:absolute;top:25px;left:calc(50% + 24px);width:calc(100% - 48px);height:3px;background:var(--steel-400);}
+.gate:last-child::after{display:none;}
+.gate.pass::after{background:#2f7f5b;}
+.lamp{width:46px;height:46px;border-radius:50%;margin:2px auto 11px;border:3px solid var(--steel-400);
+  background:var(--steel-500);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;
+  position:relative;z-index:2;transition:transform .15s,box-shadow .2s;font-family:'IBM Plex Mono',monospace;color:var(--ink-500);}
+.gate:hover .lamp{transform:scale(1.09);}
+.gate.pass .lamp{border-color:#2f7f5b;background:var(--lamp-green-dim);color:var(--lamp-green);}
+.gate.stall .lamp{border-color:var(--lamp-amber);background:var(--lamp-amber-dim);color:var(--lamp-amber);box-shadow:0 0 0 6px rgba(255,176,32,.14);}
+.gate.dead .lamp{border-color:#3a2020;background:#1d1414;color:#6b4444;}
+.gate.sel .lamp{box-shadow:0 0 0 3px var(--steel-300);}
+.gate.stall.sel .lamp{box-shadow:0 0 0 6px rgba(255,176,32,.24);}
+.g-name{font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-300);font-weight:600;line-height:1.2;}
+.gate.stall .g-name{color:var(--lamp-amber);}
+.gate.dead .g-name{color:var(--ink-500);}
+.g-pct{font-family:'IBM Plex Mono',monospace;font-size:17px;font-weight:600;color:var(--ink-100);margin-top:3px;}
+.gate.dead .g-pct{color:#6b4444;}
+.g-drop{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-500);}
+.gate.stall .g-drop{color:#c08a2a;}
+
+.drawer{background:var(--steel-800);border:1px solid var(--steel-400);border-top:3px solid var(--lamp-amber);
+  border-radius:0 0 var(--r) var(--r);padding:18px 20px 20px;margin-top:-1px;}
+.drawer.n-stall{border-top-color:var(--steel-300);}
+.drawer h3{margin:0 0 3px;font-size:21px;font-weight:600;letter-spacing:.03em;color:var(--lamp-amber);}
+.drawer.n-stall h3{color:var(--ink-100);}
+.drawer h3 span{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-500);letter-spacing:.1em;margin-left:9px;}
+.drawer > p{margin:0 0 16px;font-family:'Inter',sans-serif;font-size:13.5px;line-height:1.62;color:var(--ink-300);max-width:74ch;}
+.narrative{font-family:'Inter',sans-serif;font-size:13.5px;line-height:1.66;color:var(--ink-200);
+  background:var(--steel-700);border-left:3px solid var(--lamp-amber);padding:13px 16px;border-radius:0 var(--r) var(--r) 0;margin:0 0 16px;max-width:80ch;}
+.narrative em{color:var(--ink-500);font-style:normal;font-family:'IBM Plex Mono',monospace;font-size:10px;
+  letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:6px;}
+.flagbar{display:flex;gap:9px;align-items:flex-start;background:var(--lamp-grey-dim);border:1px dashed #3d3d4d;
+  border-radius:var(--r);padding:10px 13px;margin-bottom:16px;font-family:'Inter',sans-serif;font-size:12.5px;color:#9d9db4;line-height:1.55;max-width:82ch;}
+.flagbar b{color:#c3c3da;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.13em;text-transform:uppercase;flex:0 0 auto;padding-top:2px;}
+.sub{font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-500);margin:0 0 8px;}
+.tbl{width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:12px;}
+.tbl th{text-align:left;color:var(--ink-500);font-weight:500;padding:0 12px 6px 0;border-bottom:1px solid var(--steel-400);
+  letter-spacing:.07em;font-size:10px;text-transform:uppercase;white-space:nowrap;}
+.tbl td{padding:8px 12px 8px 0;border-bottom:1px solid var(--steel-500);color:var(--ink-200);vertical-align:top;}
+.tbl tr.censored td{color:var(--ink-400);}
+.tbl tr.censored{background:rgba(138,138,160,.05);}
+.tag{display:inline-block;padding:2px 8px;border-radius:2px;font-size:10px;letter-spacing:.05em;white-space:nowrap;}
+.tag.ok{background:var(--lamp-green-dim);color:var(--lamp-green);}
+.tag.no{background:var(--lamp-red-dim);color:var(--lamp-red);}
+.tag.cens{background:var(--lamp-grey-dim);color:var(--lamp-grey);border:1px dashed #3d3d4d;}
+.cf{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:10px;margin-top:8px;}
+.cf button{text-align:left;background:var(--steel-700);border:1px solid var(--steel-400);border-left:3px solid var(--lamp-green);
+  padding:10px 13px;font-family:'Inter',sans-serif;font-size:12.5px;color:var(--ink-300);border-radius:0 var(--r) var(--r) 0;cursor:pointer;line-height:1.45;transition:background .14s;}
+.cf button:hover{background:var(--steel-500);}
+.cf button b{display:block;font-family:'IBM Plex Mono',monospace;color:var(--lamp-green);font-size:15px;margin-bottom:2px;}
+.cf button.down{border-left-color:var(--lamp-red);} .cf button.down b{color:var(--lamp-red);}
+.cf button.flat{border-left-color:var(--steel-300);} .cf button.flat b{color:var(--ink-400);}
+.cf-none{font-family:'Inter',sans-serif;font-size:12.5px;color:var(--ink-400);line-height:1.55;max-width:74ch;}
+.caveats{margin:18px 0 0;padding:0;list-style:none;font-family:'Inter',sans-serif;font-size:12.5px;color:var(--ink-400);line-height:1.6;max-width:84ch;}
+.caveats li{padding-left:16px;position:relative;margin-bottom:5px;}
+.caveats li::before{content:"·";position:absolute;left:4px;color:var(--lamp-amber);}
+.err{background:var(--lamp-red-dim);border:1px solid #5a2a2a;color:#e8a0a0;padding:12px 15px;border-radius:var(--r);
+  font-family:'Inter',sans-serif;font-size:13px;line-height:1.55;}
+.resolved{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink-400);background:var(--steel-800);
+  border:1px solid var(--steel-400);border-radius:var(--r);padding:9px 11px;margin-bottom:14px;line-height:1.6;word-break:break-all;}
+.resolved b{color:var(--lamp-amber);display:block;letter-spacing:.1em;text-transform:uppercase;font-size:9.5px;margin-bottom:4px;}
+
+.map-shell{max-width:1560px;margin:0 auto;padding:20px;}
+.map-frame{background:var(--steel-800);border:1px solid var(--steel-400);border-radius:var(--r);overflow:hidden;position:relative;}
+#field{display:block;width:100%;height:560px;background:var(--steel-900);cursor:crosshair;}
+.hud{position:absolute;top:16px;left:16px;background:rgba(13,15,17,.9);border:1px solid var(--steel-400);
+  border-left:3px solid var(--lamp-amber);border-radius:var(--r);padding:14px 16px;max-width:280px;}
+.hud h3{margin:0 0 2px;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-500);}
+.hud h3 + p{margin:0 0 12px;font-size:20px;font-weight:600;color:var(--ink-100);letter-spacing:.03em;line-height:1.15;}
+.hud dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-family:'IBM Plex Mono',monospace;font-size:11px;}
+.hud dt{color:var(--ink-500);} .hud dd{margin:0;color:var(--ink-200);text-align:right;} .hud dd.hot{color:var(--lamp-amber);}
+.key{position:absolute;bottom:16px;left:16px;display:flex;gap:17px;flex-wrap:wrap;font-family:'IBM Plex Mono',monospace;
+  font-size:10.5px;color:var(--ink-400);background:rgba(13,15,17,.88);padding:9px 14px;border:1px solid var(--steel-400);border-radius:var(--r);}
+.key i{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;}
+.scalebar{position:absolute;bottom:16px;right:16px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-500);
+  text-align:right;background:rgba(13,15,17,.88);padding:7px 12px;border:1px solid var(--steel-400);border-radius:var(--r);letter-spacing:.05em;}
+
+.foot{border-top:1px solid var(--steel-400);background:var(--steel-900);margin-top:24px;padding:16px 20px 22px;text-align:center;
+  font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink-500);letter-spacing:.06em;line-height:1.9;}
+.foot a{color:var(--ink-400);text-decoration:none;border-bottom:1px solid var(--steel-400);}
+.foot a:hover{color:var(--lamp-amber);border-bottom-color:var(--lamp-amber);}
+
+@media (max-width:1080px){.deck{grid-template-columns:1fr;}.console{position:static;}.derived dl{grid-template-columns:repeat(2,auto 1fr);}}
+@media (max-width:720px){
+  .chassis-in{padding:10px 13px;gap:12px;} .mark b{font-size:22px;} .mark span{display:none;} .rail{display:none;}
+  .mode{width:100%;} .mode button{flex:1;justify-content:center;padding:8px 10px;font-size:13px;}
+  .readout-in{padding:11px 13px;gap:12px;} .target-id{font-size:19px;} .verdict-chip{font-size:11px;padding:6px 11px;}
+  .deck,.map-shell{padding:13px;gap:14px;} .flow{padding:20px 13px 16px;} .gate{flex:0 0 100px;}
+  .drawer{padding:15px 14px 16px;} .drawer h3{font-size:18px;} .tbl{font-size:11px;}
+  .tbl th:nth-child(3),.tbl td:nth-child(3){display:none;}
+  #field{height:400px;} .hud{position:static;max-width:none;border:0;border-bottom:1px solid var(--steel-400);border-radius:0;background:var(--steel-800);}
+  .key{position:static;border:0;border-top:1px solid var(--steel-400);border-radius:0;} .scalebar{display:none;}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;}}
+</style>
+</head>
+<body>
+
+<header class="chassis">
+  <div class="chassis-in">
+    <div class="mark">
+      <b>FAFF<i>About</i></b>
+      <span>Fine-tuned Attrition<br>Forecasting From Archives</span>
+    </div>
+    <div class="rail"></div>
+    <div class="mode">
+      <button class="on" data-view="rig">Rig</button>
+      <button data-view="map">Archive map</button>
+    </div>
+  </div>
+</header>
+
+<div class="readout">
+  <div class="readout-in">
+    <div class="target-id" id="tgtId">No target
+      <small id="tgtSub">paste a sequence, a UniProt accession or a PDB ID</small>
+    </div>
+    <div class="verdict-chip idle" id="verdict">
+      <b>AWAITING INPUT</b>
+      {{ "{:,}".format(stats.targets) }} archive targets · {{ stats.censored_pct }}% censored
+    </div>
+  </div>
+</div>
+
+<section class="view live" id="v-rig">
+  <div class="deck">
+    <aside class="console">
+      <h2>Construct console <em id="consoleState">ready</em></h2>
+      <div class="console-body">
+        <div class="fld">
+          <label for="seq">Sequence · FASTA, UniProt or PDB</label>
+          <textarea id="seq" spellcheck="false" placeholder="P0A6Y8&#10;4XB7_A&#10;or paste a FASTA sequence"></textarea>
+        </div>
+        <div class="fld">
+          <label for="method">Target method</label>
+          <select id="method">
+            <option value="xray">X-ray crystallography</option>
+            <option value="nmr">Solution NMR</option>
+            <option value="em">Cryo-EM</option>
+          </select>
+        </div>
+        <div class="fld">
+          <label for="centre">Pipeline (archive centre)</label>
+          <select id="centre">
+            <option value="JCSG">JCSG</option>
+            <option value="MCSG">MCSG</option>
+            <option value="NESG">NESG</option>
+            <option value="NYSGRC">NYSGRC</option>
+            <option value="CESG">CESG</option>
+            <option value="SSGCID">SSGCID</option>
+            <option value="CSGID">CSGID</option>
+          </select>
+        </div>
+        <div class="fld">
+          <label for="host">Expression host <span style="color:var(--ink-500)">(optional)</span></label>
+          <select id="host">
+            <option value="">not declared</option>
+            <option value="bl21">E. coli BL21(DE3), 37 °C</option>
+            <option value="arctic">E. coli Arctic Express, 12 °C</option>
+            <option value="cellfree">Cell-free</option>
+            <option value="sf9">Sf9 insect</option>
+            <option value="hek">HEK293</option>
+            <option value="pichia">Pichia</option>
+          </select>
+        </div>
+        <div class="fld">
+          <label>Affinity tag</label>
+          <div class="seg" data-group="tag">
+            <button data-v="">none</button>
+            <button data-v="his">His6</button>
+            <button data-v="mbp">MBP</button>
+            <button data-v="sumo">SUMO</button>
+            <button data-v="gst">GST</button>
+          </div>
+        </div>
+        <div class="fld">
+          <label for="protease">Protease site</label>
+          <select id="protease">
+            <option value="">none</option>
+            <option value="tev">TEV</option>
+            <option value="3c">HRV 3C</option>
+            <option value="thr">Thrombin</option>
+          </select>
+        </div>
+        <div class="sw"><span>Codon optimised</span><button data-flag="codon_optimised" aria-pressed="false"></button></div>
+        <div class="sw"><span>Auto-induction</span><button data-flag="autoinduction" aria-pressed="false"></button></div>
+        <button class="go" id="go">Forecast</button>
+      </div>
+
+      <div class="derived">
+        <h3>Derived · computed from the sequence</h3>
+        <dl id="derived">
+          <dt>Length</dt><dd>—</dd>
+          <dt>pI</dt><dd>—</dd>
+          <dt>GRAVY</dt><dd>—</dd>
+          <dt>Cys</dt><dd>—</dd>
+          <dt>Disorder</dt><dd>—</dd>
+          <dt>TM helices</dt><dd>—</dd>
+          <dt>Precedents</dt><dd>—</dd>
+          <dt>Closest</dt><dd>—</dd>
+        </dl>
+      </div>
+    </aside>
+
+    <div class="bay">
+      <div class="flow-shell">
+        <div class="flow-hd">
+          <h2>Attrition pipeline</h2>
+          <em id="flowNote">enter a target to compute the forecast</em>
+        </div>
+        <div class="flow" id="flow" role="tablist" aria-label="Pipeline stage gates"></div>
+      </div>
+      <div class="drawer n-stall" id="drawer">
+        <h3>No forecast yet</h3>
+        <p>Paste a sequence, a UniProt accession such as <span class="mono">P0A6Y8</span>, or a PDB ID such as
+        <span class="mono">4XB7_A</span>, then press Forecast. Every probability comes from gradient-boosted models
+        trained on {{ "{:,}".format(stats.targets) }} PSI TargetTrack attempts; nothing on this page is computed in the browser.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="view" id="v-map">
+  <div class="map-shell">
+    <div class="map-frame">
+      <canvas id="field" width="1520" height="560"
+        aria-label="Archive map: PSI TargetTrack centres by size and outcome"></canvas>
+      <div class="hud">
+        <h3>Archive</h3>
+        <p id="mapTitle">PSI TargetTrack</p>
+        <dl id="mapStats">
+          <dt>Targets</dt><dd>{{ "{:,}".format(stats.targets) }}</dd>
+          <dt>Deposited</dt><dd>{{ "{:,}".format(stats.deposited) }}</dd>
+          <dt>Censored</dt><dd class="hot">{{ stats.censored_pct }}%</dd>
+        </dl>
+      </div>
+      <div class="key">
+        <span><i style="background:#4fd18b"></i>deposited</span>
+        <span><i style="background:#e07070;opacity:.7"></i>stalled</span>
+        <span><i style="background:#8a8aa0;opacity:.6"></i>censored</span>
+      </div>
+      <div class="scalebar" id="scale">one column per contributing centre<br>height = targets, colour = fate</div>
+    </div>
+  </div>
+</section>
+
+<footer class="foot">
+  FAFFAbout · PSI TargetTrack 2000–2017 (<a href="https://doi.org/10.5281/zenodo.821654" target="_blank" rel="noopener noreferrer">Zenodo 10.5281/zenodo.821654</a>, CC-BY-SA-4.0)<br>
+  <a href="https://marcdeller.com" target="_blank" rel="noopener noreferrer">marcdeller.com</a> ·
+  <a href="mailto:marc@marcdeller.com">marc@marcdeller.com</a>
+</footer>
+
+<script>
+/* ============================================================
+   No probability is computed here. Everything comes from
+   POST /api/predict, which reads it from the boosters and DuckDB.
+   ============================================================ */
+const state = {method:'xray', centre:'JCSG', host:'', tag:'', protease:'',
+               codon_optimised:false, autoinduction:false, selected:null, data:null};
+
+const $ = id => document.getElementById(id);
+const pct = v => (v*100).toFixed(0);
+
+function payload(){
+  return {query:$('seq').value, method:state.method, centre:state.centre, host:state.host,
+          tag:state.tag, protease:state.protease,
+          codon_optimised:state.codon_optimised, autoinduction:state.autoinduction};
+}
+
+async function forecast(){
+  const q = $('seq').value.trim();
+  if(!q){ showError('Nothing entered. Paste a sequence, an accession or a PDB ID.'); return; }
+  $('go').disabled = true; $('consoleState').textContent = 'computing';
+  $('flowNote').textContent = 'searching 300,027 archive sequences';
+  try{
+    const r = await fetch('/api/predict', {method:'POST', headers:{'Content-Type':'application/json'},
+                                           body:JSON.stringify(payload())});
+    const d = await r.json();
+    if(!r.ok || d.error){ showError(d.error || 'The forecast failed.'); return; }
+    /* gate g is the transition g -> g+1, so the rung that fails is g+1: select that one,
+       or the drawer opens on the last rung the target still reaches */
+    state.data = d; state.selected = d.bottleneck.gate + 1;
+    render();
+  }catch(e){ showError('Could not reach the server: ' + e.message); }
+  finally{ $('go').disabled = false; $('consoleState').textContent = 'ready'; }
+}
+
+function showError(msg){
+  $('drawer').className = 'drawer n-stall';
+  $('drawer').innerHTML = '<h3>Not forecast</h3><div class="err">' + esc(msg) + '</div>';
+  $('flow').innerHTML = '';
+  $('flowNote').textContent = 'no forecast';
+}
+
+function esc(s){ const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+
+function render(){
+  const d = state.data, ladder = d.ladder, surv = d.survival, cond = d.conditional;
+  const bn = d.bottleneck.gate;
+  const t = d.target;
+
+  /* readout */
+  $('tgtId').innerHTML = esc(t.accession || t.name || 'Pasted sequence') +
+    '<small>' + esc([t.name && t.accession ? t.name : '', t.organism, t.length + ' aa',
+                     t.source.toUpperCase() + (t.chain ? ' chain ' + t.chain : '')]
+                    .filter(Boolean).join(' · ')) + '</small>';
+  const chip = $('verdict');
+  chip.className = 'verdict-chip' + (bn >= 5 ? ' crys' : '') + (surv[surv.length-1] > 0.25 ? ' ok' : '');
+  chip.innerHTML = '<b>PREDICTED STALL · ' + esc(ladder[bn].toUpperCase()) + '</b>' +
+    'survival ' + surv[bn+1].toFixed(2) + ' [' + d.bottleneck.interval[0].toFixed(2) + '–' +
+    d.bottleneck.interval[1].toFixed(2) + '] · deposition ' + surv[surv.length-1].toFixed(2) +
+    ' · evidence ' + esc(d.evidence.strength);
+
+  /* derived panel */
+  const f = d.features;
+  $('derived').innerHTML = [
+    ['Length', f.length + ' aa'], ['pI', f.pI], ['GRAVY', f.gravy],
+    ['Cys', f.cys_count], ['Disorder', pct(f.disorder_nterm) + '% N-term'],
+    ['TM helices', f.tm_helices], ['Precedents', d.evidence.n_precedents],
+    ['Closest', pct(d.evidence.closest_identity) + '% id']
+  ].map(([k,v]) => '<dt>' + k + '</dt><dd>' + esc(String(v)) + '</dd>').join('');
+
+  /* gates: one lamp per rung, showing cumulative survival */
+  $('flow').innerHTML = ladder.map((n,i) => {
+    let cls = i < bn+1 ? 'pass' : 'dead';
+    if(i === bn+1) cls = 'stall';
+    if(i === state.selected) cls += ' sel';
+    const glyph = i < bn+1 ? '✓' : (i === bn+1 ? '!' : '·');
+    const drop = i === 0 ? '' : '−' + ((surv[i-1]-surv[i])*100).toFixed(0) + ' pts';
+    return '<button class="gate ' + cls + '" data-i="' + i + '" role="tab" aria-selected="' +
+      (i === state.selected) + '"><div class="lamp">' + glyph + '</div>' +
+      '<div class="g-name">' + esc(n) + '</div>' +
+      '<div class="g-pct">' + surv[i].toFixed(2) + '</div>' +
+      '<div class="g-drop">' + drop + '</div></button>';
+  }).join('');
+  $('flow').querySelectorAll('.gate').forEach(g =>
+    g.addEventListener('click', () => { state.selected = +g.dataset.i; render(); }));
+
+  $('flowNote').textContent = 'bottleneck at ' + ladder[bn] + ' → ' + ladder[bn+1] +
+    ' · ' + (d.bottleneck.drop*100).toFixed(0) + ' pts lost · ' + d.timing_ms + ' ms';
+
+  /* drawer for the selected rung. Rung i is ARRIVED AT with probability cond[i-1]; showing
+     cond[i] would report the chance of leaving it, which is the next rung's number. */
+  const arrive = state.selected > 0 ? cond[state.selected - 1] : 1.0;
+  const isStall = state.selected === bn+1;
+  const censored = d.precedents.filter(p => p.censored);
+  const rows = d.precedents.slice(0,12).map(p => {
+    const reached = p.max_stage != null && p.max_stage >= state.selected;
+    const badge = p.censored
+      ? '<span class="tag cens">censored</span>'
+      : '<span class="tag ' + (reached ? 'ok' : 'no') + '">' + (reached ? 'cleared' : esc(p.note || 'stalled')) + '</span>';
+    return '<tr class="' + (p.censored ? 'censored' : '') + '"><td>' + esc(p.target_id) + '</td><td>' +
+      esc(p.centre) + '</td><td><i>' + esc(p.organism || '—') + '</i></td><td>' + pct(p.identity) + '%</td><td>' +
+      esc(p.max_stage != null ? ladder[p.max_stage] : '—') + '</td><td>' + badge + '</td></tr>';
+  }).join('');
+
+  const cf = d.counterfactuals.length
+    ? '<div class="cf">' + d.counterfactuals.map(c => {
+        const cls = c.delta_pts > 1.5 ? '' : (c.delta_pts < -1.5 ? 'down' : 'flat');
+        return '<button class="' + cls + '" data-change="' + esc(c.change) + '"><b>' +
+          (c.delta_pts > 0 ? '+' : '') + c.delta_pts.toFixed(1) + ' pts</b>' + esc(c.label) +
+          '<br><span style="color:var(--ink-500);font-size:11.5px">' +
+          (c.moves_bottleneck_to ? 'wall moves to ' + esc(c.moves_bottleneck_to) : 'bottleneck unchanged') +
+          '</span></button>';
+      }).join('') + '</div>'
+    : '<p class="cf-none">No counterfactuals: none are offered until an expression host or tag is declared. ' +
+      'In the archive the mere presence of a protocol correlates with progression, so the headline model ' +
+      'excludes host and tag, and the model that uses them is trained only on records that declare one.</p>';
+
+  const narrative = d.model.narrative
+    ? '<div class="narrative"><em>interpretation · ' + esc(d.model.narrative_from || 'model') + '</em>' +
+      esc(d.model.narrative).replace(/\n/g,'<br>') + '</div>'
+    : '';
+
+  $('drawer').className = 'drawer' + (isStall ? '' : ' n-stall');
+  $('drawer').innerHTML =
+    '<h3>' + esc(ladder[state.selected]) +
+      '<span>' + (state.selected > 0
+                    ? 'reached from ' + esc(ladder[state.selected-1]) + ' with p ' + arrive.toFixed(2)
+                    : 'every record starts here') +
+      ' · cumulative ' + surv[state.selected].toFixed(2) + '</span></h3>' +
+    narrative +
+    '<div class="flagbar"><b>Censoring</b><span>' +
+      (censored.length
+        ? censored.length + ' of ' + d.precedents.length + ' retrieved precedents closed when their centre wound ' +
+          'down rather than on any experimental result. They are excluded from every rate and shown grey and dashed.'
+        : 'No censored precedent among those retrieved. Across the whole archive ' +
+          {{ stats.censored_pct }} + '% of targets are censored.') +
+      '</span></div>' +
+    '<p class="sub">Archive precedents · MMseqs2, 30% identity, 80% coverage</p>' +
+    '<table class="tbl"><thead><tr><th>Target</th><th>Centre</th><th>Source</th><th>Id</th><th>Furthest</th><th>Outcome</th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="6">No precedent above 30% identity.</td></tr>') + '</tbody></table>' +
+    '<p class="sub" style="margin-top:18px">Counterfactuals · click to apply</p>' + cf +
+    '<p class="sub" style="margin-top:18px">Caveats</p>' +
+    '<ul class="caveats">' + d.caveats.map(c => '<li>' + esc(c) + '</li>').join('') + '</ul>';
+
+  $('drawer').querySelectorAll('.cf button').forEach(b =>
+    b.addEventListener('click', () => {
+      const [k,v] = b.dataset.change.split(':');
+      state[k] = (v === 'True') ? true : (v === 'False' ? false : v);
+      syncControls(); forecast();
+    }));
+}
+
+function syncControls(){
+  $('method').value = state.method; $('centre').value = state.centre;
+  $('host').value = state.host; $('protease').value = state.protease;
+  document.querySelectorAll('.seg[data-group="tag"] button').forEach(b =>
+    b.classList.toggle('on', b.dataset.v === state.tag));
+  document.querySelectorAll('.sw button').forEach(b => {
+    const on = !!state[b.dataset.flag];
+    b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+
+['method','centre','host','protease'].forEach(id =>
+  $(id).addEventListener('change', e => { state[id] = e.target.value; }));
+document.querySelectorAll('.seg[data-group="tag"] button').forEach(b =>
+  b.addEventListener('click', () => { state.tag = b.dataset.v; syncControls(); }));
+document.querySelectorAll('.sw button').forEach(b =>
+  b.addEventListener('click', () => { state[b.dataset.flag] = !state[b.dataset.flag]; syncControls(); }));
+$('go').addEventListener('click', forecast);
+$('seq').addEventListener('keydown', e => { if(e.key === 'Enter' && (e.metaKey || e.ctrlKey)) forecast(); });
+
+document.querySelectorAll('.mode button').forEach(b =>
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.mode button').forEach(x => x.classList.remove('on'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('live'));
+    b.classList.add('on');
+    $('v-' + b.dataset.view).classList.add('live');
+    if(b.dataset.view === 'map') drawMap();
+  }));
+
+/* ---- archive map: real per-centre counts, not a synthetic cloud ---- */
+let mapData = null;
+async function drawMap(){
+  const cv = $('field'), ctx = cv.getContext('2d');
+  if(!mapData){
+    try{ mapData = await (await fetch('/api/archive')).json(); }
+    catch(e){ return; }
+  }
+  const W = cv.width, H = cv.height, pad = 54;
+  ctx.fillStyle = '#0d0f11'; ctx.fillRect(0,0,W,H);
+  const centres = mapData.centres.filter(c => c.n > 0);
+  const max = Math.max(...centres.map(c => c.n));
+  const bw = (W - pad*2) / centres.length;
+  ctx.font = '10px "IBM Plex Mono", monospace';
+  centres.forEach((c,i) => {
+    const x = pad + i*bw, h = (H - pad*2) * (c.n / max);
+    const y = H - pad - h;
+    const dep = h * (c.deposited / c.n), cen = h * (c.censored / c.n);
+    ctx.fillStyle = 'rgba(224,112,112,0.30)'; ctx.fillRect(x+1, y, bw-2, h);
+    ctx.fillStyle = 'rgba(138,138,160,0.42)'; ctx.fillRect(x+1, y+h-cen-dep, bw-2, cen);
+    ctx.fillStyle = 'rgba(79,209,139,0.92)'; ctx.fillRect(x+1, y+h-dep, bw-2, dep);
+    if(bw > 13){
+      ctx.save(); ctx.translate(x + bw/2, H - pad + 6); ctx.rotate(-Math.PI/3);
+      ctx.fillStyle = '#6d777e'; ctx.textAlign = 'right';
+      ctx.fillText(c.centre, 0, 0); ctx.restore();
+    }
+  });
+  ctx.strokeStyle = 'rgba(44,50,55,0.9)'; ctx.beginPath();
+  ctx.moveTo(pad, H-pad); ctx.lineTo(W-pad, H-pad); ctx.stroke();
+  ctx.fillStyle = '#4b545a'; ctx.textAlign = 'left';
+  ctx.fillText('targets per contributing centre (log-free linear scale, max ' + max.toLocaleString() + ')', pad, 24);
+}
+
+syncControls();
+</script>
+</body>
+</html>

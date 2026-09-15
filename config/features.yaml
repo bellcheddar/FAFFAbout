@@ -99,6 +99,13 @@ declared_protocol:
     - protease
     - codon_optimised
     - autoinduction
+    # `host` collapses to five archive values (ecoli, cell_free, insect, mammalian,
+    # yeast), so BL21 at 37 C and Arctic Express at 12 C are the SAME value and the
+    # interface's headline counterfactual ("switch to Arctic Express") could not move the
+    # forecast at all: measured deltas were under half a point. cold_shock is mined from
+    # the same protocol text and is the only feature that separates them.
+    - cold_shock
+    - iptg
 
 post_hoc:
   # NEVER a model input. Kept in the tables for the app's retrospective views, for the
