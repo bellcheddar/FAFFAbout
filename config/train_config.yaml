@@ -42,15 +42,22 @@ lora_parameters:
   dropout: 0.05                 # nonzero: the SFT set has templated structure
 
 # --- Optimisation ------------------------------------------------------------------
-# 120,000 training records at batch_size 4 is 30,000 steps per epoch, so 6,000 iterations
-# is roughly one fifth of an epoch. Raise iters or cut --max-records for a full pass.
-iters: 6000
+# Measured on this M1 Max (32 GPU cores, 64 GB): 0.07 it/sec, i.e. 13.7 s per iteration.
+# The spec's "1.5 to 3.0 it/s on M1" was never achievable for an 8B model at batch 4, and
+# 6,000 iterations would have taken 23.8 h of training plus 4.8 h of validation.
+# 2,000 iterations is 7.6 h, which finishes overnight, and covers 8,000 of 120,000
+# records. Training loss was already 0.77 by iteration 20, so a corpus this templated is
+# learned quickly; round 02 extends it if the calibration eval says otherwise.
+#
+# NOTE: lr_schedule's decay length must equal iters, or the cosine never finishes
+# annealing and the run ends at a learning rate it was never meant to stop at.
+iters: 2000
 batch_size: 4
 learning_rate: 1.0e-4           # half the ChemSage rate: 32 adapted layers, not 16
 lr_schedule:
   name: cosine_decay
   warmup: 200
-  arguments: [1.0e-4, 6000, 1.0e-6]
+  arguments: [1.0e-4, 2000, 1.0e-6]
 max_seq_length: 2048            # the corpus tops out near 700 tokens, so nothing truncates
 grad_checkpoint: true           # never disable this to save memory: it silently corrupts
                                 # output on this M1 rather than erroring
@@ -68,6 +75,7 @@ project_name: faffabout
 # steps_per_eval must be a whole MULTIPLE of steps_per_report, never equal to it:
 # equal cadences produce a handful of points across the whole run.
 steps_per_report: 10
-steps_per_eval: 50
-val_batches: 40
+steps_per_eval: 250
+val_batches: 40                 # 144 s per eval pass; at steps_per_eval 250 that is 8
+                                # evals and 19 min, against 120 evals and 4.8 h at 50
 save_every: 500
