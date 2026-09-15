@@ -13,6 +13,9 @@ data/parquet/
 data/clusters/
 data/sft/
 data/features/
+# MMseqs2 search index: 1.7 GB, rebuilt by `mmseqs createdb` + `createindex` from
+# data/parquet/targets.fasta. Regenerable build output, and catastrophic in a public repo.
+data/search/
 data/*.duckdb
 data/*.duckdb.wal
 
@@ -51,6 +54,7 @@ baseline/models/
 eval/generative_results.json
 eval/generative_review.md
 eval/calibration.json
+eval/narrative_value.json
 
 # Downloaded reference data (NCBI taxonomy dump) and run logs
 /data/external/
