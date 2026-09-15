@@ -138,8 +138,22 @@ def evaluate(y, p) -> dict:
     return out
 
 
+def dump_schema(X: pd.DataFrame, prefix: str) -> None:
+    """Write the exact columns and category LEVELS the boosters were trained on.
+
+    LightGBM encodes categoricals by their pandas category codes, so a caller that builds
+    a fresh one-row frame gets different codes and predict() fails with "train and valid
+    dataset categorical_feature do not match". The levels have to travel with the model.
+    """
+    import json
+    schema = {"features": list(X.columns),
+              "categorical": {c: [str(v) for v in X[c].cat.categories]
+                              for c in X.columns if str(X[c].dtype) == "category"}}
+    (MODELS / f"{prefix}schema.json").write_text(json.dumps(schema, indent=2))
+
+
 def run(con, split_col: str, test_label: str, tag: str, columns: list[str],
-        save: bool = False, require_protocol: bool = False) -> dict:
+        save: bool = False, require_protocol: bool = False, prefix: str = "") -> dict:
     df = load(con, split_col)
     if require_protocol:
         # restrict to rows that already declare a protocol, so its PRESENCE is constant
@@ -149,6 +163,8 @@ def run(con, split_col: str, test_label: str, tag: str, columns: list[str],
     results = {"split": tag, "n_features": X.shape[1], "n_rows": int(len(df)), "gates": {}}
     importances: list[pd.DataFrame] = []
     MODELS.mkdir(parents=True, exist_ok=True)
+    if save:
+        dump_schema(X, prefix)
 
     for g in range(8):
         m = df.gate == g
@@ -166,7 +182,7 @@ def run(con, split_col: str, test_label: str, tag: str, columns: list[str],
         results["gates"][g] = {"gate_name": f"{LADDER[g]} -> {LADDER[g+1]}",
                                "best_iteration": booster.best_iteration, **evaluate(y[te], p)}
         if save:
-            booster.save_model(str(MODELS / f"gate_{g}.txt"))
+            booster.save_model(str(MODELS / f"{prefix}gate_{g}.txt"))
             imp = pd.DataFrame({"feature": booster.feature_name(),
                                 "gain": booster.feature_importance("gain"), "gate": g})
             importances.append(imp)
@@ -183,9 +199,9 @@ def run(con, split_col: str, test_label: str, tag: str, columns: list[str],
         p2 = b2.predict(x2[te], num_iteration=b2.best_iteration)
         results["terminal"] = {"best_iteration": b2.best_iteration, **evaluate(y2[te], p2)}
         if save:
-            b2.save_model(str(MODELS / "terminal.txt"))
+            b2.save_model(str(MODELS / f"{prefix}terminal.txt"))
 
-    if importances and save:
+    if importances and save and not prefix:
         (pd.concat(importances).groupby("feature").gain.sum().sort_values(ascending=False)
          .to_csv(OUT / "feature_importance.csv", header=["total_gain"]))
     return results
@@ -228,7 +244,8 @@ def main() -> None:
         out["declared_protocol"] = run(
             con, "split_cluster", "test",
             "cluster, rows with a declared protocol, host/tag/protease as inputs",
-            PREDICTION_TIME + DECLARED_PROTOCOL, require_protocol=True)
+            PREDICTION_TIME + DECLARED_PROTOCOL, require_protocol=True,
+            save=True, prefix="declared_")
         show(out["declared_protocol"])
     if args.leak_check:
         out["cluster_with_post_hoc"] = run(con, "split_cluster", "test",
