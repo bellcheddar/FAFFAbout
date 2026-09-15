@@ -294,6 +294,20 @@ The counterfactual buttons re-run the model with one lever changed. They appear 
 
 ![The archive map view: one column per contributing centre across the whole PSI TargetTrack archive, ordered by size from MCSG and NESG down to the smallest centres. Each column is split by fate, with deposited in green at the base, censored in grey and stalled in red. A panel reports 335,771 targets, 10,500 deposited and 19.0% censored.](docs/screenshots/archive_map.png)
 
+### Is the narrative worth anything?
+
+`eval/eval_narrative_value.py` answers the question the specification makes central: "if you cannot state a number the LLM adds over the GBM, you are shipping decoration." The calibration eval answers it for the probability; this answers it for the prose, which is the only thing the model is permitted to write.
+
+The concern is concrete rather than theoretical. Round 01's training loss fell from 2.654 to 0.199 within fifty iterations, which is what fitting a template looks like: the SFT completions are generated from a small set of Python templates, so a model can learn to recite them almost immediately and still score well on both hallucination and calibration.
+
+| Measure | What a failure looks like | Corpus floor |
+|---|---|---|
+| Template echo | Text matches the nearest training completion, so the model is reciting | 0.554 mean, 0.881 max |
+| Responsiveness | Narratives for *different* targets resemble each other: the same paragraph for every protein | 0.138 mean pairwise |
+| Bottleneck top-1 | The named wall disagrees with the held-out answer | 24/24 (self-comparison, so a ceiling) |
+
+Run with `--dry-run` it scores the corpus against itself, which is the floor a model must **beat rather than match**, since the corpus is the templates.
+
 ## 🎓 Roadmap and the science
 
 The full plan is in `PROJECT_PLAN.md` and the specification in `faffabout_build_spec_v1.md`. The parts that matter most:
