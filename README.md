@@ -322,6 +322,7 @@ The full plan is in `PROJECT_PLAN.md` and the specification in `faffabout_build_
 - [x] **Phase 3: feature provenance.** `config/features.yaml` separates prediction-time from post-hoc features, after the first baseline scored a meaningless 0.985
 - [x] **Phase 3: licence and model source.** `meta-llama/Llama-3.1-8B-Instruct` is already accessible with the existing HuggingFace token, and `mlx-community/Meta-Llama-3.1-8B-Instruct-8bit` is the same model pre-quantised, ungated, at 8.54 GB instead of 25 GB for a local convert
 - [ ] **Phase 3: LoRA.** Config, launcher and preflight are written and validated against the installed mlx-lm. Blocked on a reboot: 1.8 GB of swap is in use and the machine has been up five days
+- [ ] **Housekeeping: keep `data/` out of iCloud.** 5.1 GB of regenerable build output is being synced to iCloud and OneDrive from `~/Documents`. It does not slow training (measured: GPU-bound), but it is pointless upload traffic and risks eviction stalls. Move it after round 01
 - [ ] **Phase 3: DPO.** Optional preference stage on the L3 pairs if the SFT model is overconfident
 - [ ] **Phase 3: fuse.** `--de-quantize` needs roughly 16 GB more than the 15 GB free; serving from base plus adapter avoids it
 - [x] **Phase 3: eval harness.** `eval/eval_calibration.py` (Brier, 10-bin ECE, per-gate AUROC, bottleneck top-1, GBM delta, reliability tables) and `eval/eval_generative.py` (automatic hallucinated-identifier check plus a 40-case rubric form). Both run against the GBM today and against a served adapter with `--llm-endpoint`
