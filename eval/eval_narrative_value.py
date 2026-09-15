@@ -67,6 +67,32 @@ def mean_pairwise(texts: list[str]) -> float:
     return sum(jaccard(sh[i], sh[j]) for i, j in pairs) / len(pairs)
 
 
+GATE_ROW = re.compile(r"(\w[\w ]*?) -> (\w[\w ]*?): ([0-9.]+) conditional, ([0-9.]+) cumulative")
+
+
+def expected_bottleneck(prompt: str) -> str | None:
+    """The gate the prompt's OWN numbers identify as the wall.
+
+    Derived from the gate table in the prompt, never from the reference completion: a
+    check that reads the answer it is marking is not a check. The definition matches the
+    corpus generator exactly (lowest conditional, named by the gate it leaves from), so a
+    model is judged against the same rule that produced its training targets.
+
+    The first version of this searched the PROMPT for "Predicted bottleneck:", which only
+    ever appears in the COMPLETION, so it scored 0/24 on a corpus that names its gate every
+    single time.
+    """
+    rows = GATE_ROW.findall(prompt)
+    if not rows:
+        return None
+    best, worst = None, 2.0
+    for frm, _to, cond, _cum in rows:
+        c = float(cond)
+        if c < worst:
+            worst, best = c, frm.strip()
+    return best
+
+
 def complete(messages, endpoint: str, model: str, max_tokens: int = 320) -> str:
     import requests
     r = requests.post(f"{endpoint}/chat/completions", timeout=180,
@@ -142,12 +168,10 @@ def main() -> None:
     print("                  (similarity BETWEEN narratives for different targets; "
           "high means the text ignores its input)")
 
-    # grounding: does the text name the gate it was given?
     grounded = 0
     for t, rec in zip(texts, sources):
-        prompt = rec["messages"][1]["content"]
-        gate = re.search(r"Predicted bottleneck: (\w+)", prompt)
-        if gate and gate.group(1).lower() in t.lower():
+        want = expected_bottleneck(rec["messages"][1]["content"])
+        if want and want.lower() in t.lower():
             grounded += 1
     print(f"  grounding       {grounded}/{len(texts)} name the bottleneck they were given")
 
