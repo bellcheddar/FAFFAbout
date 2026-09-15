@@ -54,3 +54,6 @@ eval/calibration.json
 
 # Downloaded reference data (NCBI taxonomy dump) and run logs
 /data/external/
+
+# Headless Chrome profile created by scripts/screenshot.py
+data/chrome-profile/

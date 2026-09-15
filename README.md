@@ -14,6 +14,8 @@
 
 ---
 
+![The FAFFAbout Pipeline Rig showing a forecast for UniProt P0A6Y8, the E. coli chaperone DnaK. Eight gate lamps run from selected through to deposited; the first five are green and crystallised is lit amber as the predicted wall, with cumulative survival falling from 1.00 to 0.18 there. The console on the left carries the sequence, method, centre, host, tag and protease. Below, a precedent table lists real archive targets with censored records greyed and dashed, then counterfactual buttons and the caveats.](docs/screenshots/rig.png)
+
 FAFFAbout is a decision-support tool for the first week of a structure project. You paste a FASTA, a UniProt accession or a PDB ID and get a breakdown of the protein plus calibrated guidance on where comparable targets historically stalled (cloning, expression, solubility, purification, crystallisation, diffraction, structure, deposition), which construct and host choices moved the needle, and how much confidence the evidence actually supports. It is grounded in the Protein Structure Initiative's TargetTrack archive: 335,771 targets, 961,548 experimental trials and 3.8 million status events from 41 structural genomics centres, 2000 to 2017.
 
 **Why it matters:** the PSI archive is the only large corpus that records where protein production attempts *stopped*, not just which ones succeeded, and nobody has turned it into a forecasting tool. The trap is that a target parked at "cloned" in June 2017 is one of three things (failed on scientific grounds, censored because its centre's funding ended, or still in flight when the archive froze), and a model that cannot tell them apart learns to predict when US funding programmes ended. FAFFAbout derives censoring empirically per centre, keeps it as a first-class flag through every table, and never lets it become a negative label. It is useful for: triaging a target list before ordering genes, choosing between orthologues, deciding on a host and tag with evidence rather than habit, and setting honest expectations with collaborators.
@@ -273,6 +275,24 @@ The temporal reliability table shows the honest shape of forecasting the future:
 `eval/eval_generative.py` has two halves. The automatic half fails the run outright on a **hallucinated identifier**, a target id or PDB code in a completion that was not in its own prompt, since that means facts leaked into the weights that should have stayed in retrieval. Building the identifier pattern from the archive's 41 real centre names rather than a general one matters: `[A-Z][A-Za-z0-9]+-...` also matches ordinary hyphenated English, and reported "Gate-by" out of "Gate-by-gate outlook" as a hallucination in 10 of 40 cases. The manual half writes a 40-case rubric form for a domain expert, which is the acceptance test and is not automatable.
 
 Two structural points the harness had to be built around. Cluster-held-out prompts carry **no precedent table at all**, because whole clusters are held out, so the citation and censoring checks score zero there for a structural reason rather than a model one. The generative eval therefore grades the **temporal** held-out set, where 1,433 of 2,000 records carry precedents and 1,265 carry censored context. And sampling from the head of a corpus written in token-length order systematically picks the shortest, least-context records: that drew 2 cases with censored context where the full set has 1,265.
+
+## 🖥️ The application
+
+`app/server.py` behind gunicorn and nginx. One field takes a FASTA sequence, a UniProt accession or a PDB ID with an optional chain, and the resolved sequence is always shown before anything is computed, because a silently mis-resolved identifier produces a confident forecast for the wrong protein.
+
+A request runs an MMseqs2 search over all 300,027 distinct archive sequences in about 0.8 seconds, joins the hits onto targets, censoring and outcomes in DuckDB, computes the sequence features, and scores each of the eight gates with its booster. **Nothing in the browser computes a probability.** The prototype in `faffabout_rig_v1.html` carried invented probability vectors and hand-written deltas in JavaScript; every number on the page now comes from `POST /api/predict`.
+
+| Endpoint | Does |
+|---|---|
+| `GET /` | the Pipeline Rig; `?q=P0A6Y8&host=arctic&tag=his` renders a shareable forecast |
+| `POST /api/resolve` | whatever was pasted, resolved to a sequence and shown before computing |
+| `POST /api/predict` | the full forecast of specification section 7.3 |
+| `GET /api/archive` | per-centre outcome counts for the archive map |
+| `GET /healthz` | each piece reported separately, so a half-provisioned box is obvious |
+
+The counterfactual buttons re-run the model with one lever changed. They appear only once a host or tag is declared, because in the archive the mere *presence* of a protocol correlates with progression, so the headline model excludes those fields and a second model, trained only on records that declare one, answers the "what if" questions.
+
+![The archive map view: one column per contributing centre across the whole PSI TargetTrack archive, ordered by size from MCSG and NESG down to the smallest centres. Each column is split by fate, with deposited in green at the base, censored in grey and stalled in red. A panel reports 335,771 targets, 10,500 deposited and 19.0% censored.](docs/screenshots/archive_map.png)
 
 ## 🎓 Roadmap and the science
 

@@ -185,7 +185,7 @@ button,select,input,textarea{font-family:inherit;color:inherit;}
 .hud h3 + p{margin:0 0 12px;font-size:20px;font-weight:600;color:var(--ink-100);letter-spacing:.03em;line-height:1.15;}
 .hud dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-family:'IBM Plex Mono',monospace;font-size:11px;}
 .hud dt{color:var(--ink-500);} .hud dd{margin:0;color:var(--ink-200);text-align:right;} .hud dd.hot{color:var(--lamp-amber);}
-.key{position:absolute;bottom:16px;left:16px;display:flex;gap:17px;flex-wrap:wrap;font-family:'IBM Plex Mono',monospace;
+.key{position:absolute;top:16px;right:16px;display:flex;gap:17px;flex-wrap:wrap;font-family:'IBM Plex Mono',monospace;
   font-size:10.5px;color:var(--ink-400);background:rgba(13,15,17,.88);padding:9px 14px;border:1px solid var(--steel-400);border-radius:var(--r);}
 .key i{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;}
 .scalebar{position:absolute;bottom:16px;right:16px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-500);
@@ -422,7 +422,7 @@ function render(){
                     .filter(Boolean).join(' · ')) + '</small>';
   const chip = $('verdict');
   chip.className = 'verdict-chip' + (bn >= 5 ? ' crys' : '') + (surv[surv.length-1] > 0.25 ? ' ok' : '');
-  chip.innerHTML = '<b>PREDICTED STALL · ' + esc(ladder[bn].toUpperCase()) + '</b>' +
+  chip.innerHTML = '<b>PREDICTED STALL · ' + esc(ladder[bn+1].toUpperCase()) + '</b>' +
     'survival ' + surv[bn+1].toFixed(2) + ' [' + d.bottleneck.interval[0].toFixed(2) + '–' +
     d.bottleneck.interval[1].toFixed(2) + '] · deposition ' + surv[surv.length-1].toFixed(2) +
     ' · evidence ' + esc(d.evidence.strength);
@@ -464,7 +464,7 @@ function render(){
     const reached = p.max_stage != null && p.max_stage >= state.selected;
     const badge = p.censored
       ? '<span class="tag cens">censored</span>'
-      : '<span class="tag ' + (reached ? 'ok' : 'no') + '">' + (reached ? 'cleared' : esc(p.note || 'stalled')) + '</span>';
+      : '<span class="tag ' + (reached ? 'ok' : 'no') + '">' + (reached ? 'reached' : esc(p.note || 'stalled')) + '</span>';
     return '<tr class="' + (p.censored ? 'censored' : '') + '"><td>' + esc(p.target_id) + '</td><td>' +
       esc(p.centre) + '</td><td><i>' + esc(p.organism || '—') + '</i></td><td>' + pct(p.identity) + '%</td><td>' +
       esc(p.max_stage != null ? ladder[p.max_stage] : '—') + '</td><td>' + badge + '</td></tr>';
@@ -555,32 +555,45 @@ async function drawMap(){
     try{ mapData = await (await fetch('/api/archive')).json(); }
     catch(e){ return; }
   }
-  const W = cv.width, H = cv.height, pad = 54;
+  const W = cv.width, H = cv.height, pad = 54, padBottom = 96, padTop = 150;
   ctx.fillStyle = '#0d0f11'; ctx.fillRect(0,0,W,H);
   const centres = mapData.centres.filter(c => c.n > 0);
   const max = Math.max(...centres.map(c => c.n));
   const bw = (W - pad*2) / centres.length;
   ctx.font = '10px "IBM Plex Mono", monospace';
   centres.forEach((c,i) => {
-    const x = pad + i*bw, h = (H - pad*2) * (c.n / max);
-    const y = H - pad - h;
+    const x = pad + i*bw, h = (H - padTop - padBottom) * (c.n / max);
+    const y = H - padBottom - h;
     const dep = h * (c.deposited / c.n), cen = h * (c.censored / c.n);
     ctx.fillStyle = 'rgba(224,112,112,0.30)'; ctx.fillRect(x+1, y, bw-2, h);
     ctx.fillStyle = 'rgba(138,138,160,0.42)'; ctx.fillRect(x+1, y+h-cen-dep, bw-2, cen);
     ctx.fillStyle = 'rgba(79,209,139,0.92)'; ctx.fillRect(x+1, y+h-dep, bw-2, dep);
     if(bw > 13){
-      ctx.save(); ctx.translate(x + bw/2, H - pad + 6); ctx.rotate(-Math.PI/3);
+      ctx.save(); ctx.translate(x + bw/2, H - padBottom + 8); ctx.rotate(-Math.PI/3);
       ctx.fillStyle = '#6d777e'; ctx.textAlign = 'right';
       ctx.fillText(c.centre, 0, 0); ctx.restore();
     }
   });
   ctx.strokeStyle = 'rgba(44,50,55,0.9)'; ctx.beginPath();
-  ctx.moveTo(pad, H-pad); ctx.lineTo(W-pad, H-pad); ctx.stroke();
+  ctx.moveTo(pad, H-padBottom); ctx.lineTo(W-pad, H-padBottom); ctx.stroke();
   ctx.fillStyle = '#4b545a'; ctx.textAlign = 'left';
-  ctx.fillText('targets per contributing centre (log-free linear scale, max ' + max.toLocaleString() + ')', pad, 24);
+  /* clear of the HUD panel, which is pinned to the top left */
+  ctx.fillText('targets per contributing centre · bar height is the target count, tallest is '
+               + max.toLocaleString(), 330, 30);
 }
 
-syncControls();
+/* ---- shareable forecast: /?q=P0A6Y8&host=arctic&tag=his ----
+   A forecast is worth sending to a colleague, so the console state lives in the URL.
+   It also means the page can render a real result without anyone clicking, which is how
+   the README screenshot is captured. */
+(function initFromUrl(){
+  const p = new URLSearchParams(location.search);
+  const q = p.get('q');
+  ['method','centre','host','tag','protease'].forEach(k => { if(p.has(k)) state[k] = p.get(k); });
+  ['codon_optimised','autoinduction'].forEach(k => { if(p.has(k)) state[k] = p.get(k) === '1'; });
+  syncControls();
+  if(q){ $('seq').value = q; forecast(); }
+})();
 </script>
 </body>
 </html>
