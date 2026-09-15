@@ -51,3 +51,6 @@ baseline/models/
 eval/generative_results.json
 eval/generative_review.md
 eval/calibration.json
+
+# Downloaded reference data (NCBI taxonomy dump) and run logs
+/data/external/
