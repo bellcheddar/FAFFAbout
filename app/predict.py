@@ -167,10 +167,13 @@ def sequence_features(sequence: str) -> dict:
 
 
 def feature_row(sequence: str, organism: str, taxon_id: str, ctx: dict,
-                choices: Choices, gate: int) -> dict:
-    tax = taxonomy().classify(taxon_id, organism)
+                choices: Choices, gate: int, seq_feats: dict | None = None,
+                tax: dict | None = None) -> dict:
+    """`seq_feats` and `tax` are passed in by callers that score many gates for one
+    sequence, because neither depends on the gate or on the pipeline choices."""
+    tax = tax if tax is not None else taxonomy().classify(taxon_id, organism)
     per_gate = ctx.get("per_gate", {}).get(gate, {})
-    row = sequence_features(sequence)
+    row = dict(seq_feats) if seq_feats is not None else sequence_features(sequence)
     row |= {
         "superkingdom": tax["superkingdom"] or None,
         "kingdom": tax["kingdom"] or None,
@@ -246,7 +249,8 @@ def _frame(row: dict, booster, prefix: str) -> pd.DataFrame:
 
 
 def conditional(sequence: str, organism: str, taxon_id: str, ctx: dict,
-                choices: Choices) -> tuple[list[float], str]:
+                choices: Choices, seq_feats: dict | None = None,
+                tax: dict | None = None) -> tuple[list[float], str]:
     """Probability of clearing each gate, given the one before it cleared."""
     prefix = "declared_" if choices.declares_protocol else ""
     try:
@@ -254,13 +258,15 @@ def conditional(sequence: str, organism: str, taxon_id: str, ctx: dict,
     except FileNotFoundError:
         prefix = ""
         bst = boosters("")
+    seq_feats = seq_feats if seq_feats is not None else sequence_features(sequence)
+    tax = tax if tax is not None else taxonomy().classify(taxon_id, organism)
     out = []
     for g in range(N_GATES):
         b = bst.get(g)
         if b is None:
             out.append(float("nan"))
             continue
-        row = feature_row(sequence, organism, taxon_id, ctx, choices, g)
+        row = feature_row(sequence, organism, taxon_id, ctx, choices, g, seq_feats, tax)
         p = float(b.predict(_frame(row, b, prefix))[0])
         out.append(min(0.99, max(0.01, p)))
     return out, prefix
@@ -302,7 +308,10 @@ def forecast(resolved, ctx: dict, precedents: list, choices: Choices) -> dict:
     """The full POST /predict payload, minus the narrative."""
     seq = resolved.sequence
     ladder = LADDERS.get(choices.method, LADDERS["xray"])
-    cond, prefix = conditional(seq, resolved.organism, resolved.taxon_id, ctx, choices)
+    feats = sequence_features(seq)
+    tax = taxonomy().classify(resolved.taxon_id, resolved.organism)
+    cond, prefix = conditional(seq, resolved.organism, resolved.taxon_id, ctx, choices,
+                               feats, tax)
     surv = survival(cond)
     bn = bottleneck(surv)
     g = bn["gate"]
@@ -310,8 +319,6 @@ def forecast(resolved, ctx: dict, precedents: list, choices: Choices) -> dict:
     lo, hi = jeffreys_interval(pg.get("n_precedents_cleared", 0) or 0,
                               pg.get("n_precedents", 0) or 0)
 
-    feats = sequence_features(seq)
-    tax = taxonomy().classify(resolved.taxon_id, resolved.organism)
     caveats = build_caveats(ctx, feats, tax, choices, resolved)
 
     return {
@@ -345,7 +352,7 @@ def forecast(resolved, ctx: dict, precedents: list, choices: Choices) -> dict:
             "per_gate": {str(k): v for k, v in ctx.get("per_gate", {}).items()},
         },
         "precedents": [p.as_dict() for p in precedents[:40]],
-        "counterfactuals": counterfactuals(resolved, ctx, choices, surv, g),
+        "counterfactuals": counterfactuals(resolved, ctx, choices, surv, g, feats, tax),
         "model": {"probabilities_from": f"lightgbm:{prefix or 'headline'}",
                   "narrative_from": None, "narrative": None},
         "caveats": caveats,
@@ -366,7 +373,8 @@ COUNTERFACTUALS = [
 
 
 def counterfactuals(resolved, ctx: dict, choices: Choices,
-                    base_surv: list[float], base_gate: int) -> list[dict]:
+                    base_surv: list[float], base_gate: int,
+                    seq_feats: dict | None = None, tax: dict | None = None) -> list[dict]:
     """Re-run the model with one lever changed. Only meaningful once a protocol is declared.
 
     Requires the declared_ boosters, which are the only ones that take host, tag and
@@ -387,7 +395,7 @@ def counterfactuals(resolved, ctx: dict, choices: Choices,
         alt = replace(choices, **{field_name: value})
         try:
             cond, _ = conditional(resolved.sequence, resolved.organism,
-                                  resolved.taxon_id, ctx, alt)
+                                  resolved.taxon_id, ctx, alt, seq_feats, tax)
         except Exception:  # noqa: BLE001
             continue
         s = survival(cond)
