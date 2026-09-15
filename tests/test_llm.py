@@ -75,16 +75,77 @@ def test_prompt_flags_censored_precedents():
     assert "censored at centre closure" in p
 
 
-def test_prompt_states_the_computed_numbers_as_given():
+def test_prompt_matches_the_shape_the_model_was_trained_on():
+    """scripts/07_build_sft.py's pipeline_forecast prompt carries features, evidence and
+    precedents, and NO precomputed forecast. Handing the model a "Computed forecast:"
+    block would be a distribution it has never seen."""
     p = llm.build_prompt(payload())
-    assert "purified -> crystallised" in p
-    assert "are not yours to change" in p
+    assert "Target features:" in p and "Archive evidence:" in p
+    assert "Computed forecast:" not in p
+    assert "conditional" not in p
+    assert "are not yours to change" not in p
+
+
+def test_the_models_own_numbers_are_stripped_before_display():
+    """Spec 7.4: the GBM supplies every figure. Two disagreeing sets of numbers on one
+    page is worse than one."""
+    text = ("Gate-by-gate outlook:\n"
+            "  purified -> crystallised: 0.18 conditional, 0.18 cumulative\n"
+            "  crystallised -> diffracting: 0.95 conditional, 0.17 cumulative\n\n"
+            "Crystallisation is the wall here, and the evidence is thin.")
+    clean, stripped = llm.strip_generated_numbers(text)
+    assert stripped is True
+    assert "0.18" not in clean and "conditional" not in clean
+    assert "Crystallisation is the wall here" in clean
+
+
+def test_prose_without_numbers_is_left_untouched():
+    text = "Crystallisation is the wall, and two precedents are censored."
+    clean, stripped = llm.strip_generated_numbers(text)
+    assert clean == text and stripped is False
 
 
 def test_prompt_survives_a_target_with_no_precedents():
     p = llm.build_prompt(payload(precedents=[]))
     assert "Precedents:" not in p
-    assert "purified" in p
+    assert "Target features:" in p and "Archive evidence:" in p
+
+
+def test_serving_prompt_matches_the_training_prompt_shape():
+    """The defect this locks down: app/llm.py and scripts/07_build_sft.py drifted apart.
+
+    The serving prompt had grown a "Computed forecast:" block of GBM numbers that appears
+    in no training example, so the fine-tuned model would have met an unseen distribution
+    the first time anyone used it. Nothing caught that, because each file was internally
+    consistent. This builds both and compares their structure.
+    """
+    import random
+    sys.path.insert(0, str(ROOT / "scripts"))
+    sft = __import__("07_build_sft")
+
+    row = {
+        "target_id": "JCSG-1", "centre": "JCSG", "gate": 4, "label": "failed", "max_stage": 4,
+        "organism": "Escherichia coli", "superkingdom": "Bacteria", "seq_len": 638,
+        "pi": 4.58, "gravy": -0.409, "net_charge_ph7": -24.1, "cys_count": 1,
+        "tm_helices": 0, "signal_peptide": False, "disorder_frac": 0.07,
+        "disorder_nterm": 0.07, "disorder_cterm": 0.02, "low_complexity_frac": 0.03,
+        "protein_types": "", "target_construct_type": "", "host": None, "tag": None,
+        "protease": None, "n_precedents": 297, "n_precedents_cleared": 100,
+        "cluster_base_rate": 0.34, "n_close_precedents": 14, "cluster_censored_frac": 0.37,
+        "precedents": [{"target_id": "MCSG-APC106035", "centre": "MCSG",
+                        "organism": "Escherichia coli", "max_stage": 0, "censored": False}],
+        "gate_rates": {},
+    }
+    train_prompt = sft.pipeline_forecast(row, random.Random(0))["messages"][1]["content"]
+    serve_prompt = llm.build_prompt(payload())
+
+    def sections(text):
+        return {ln.strip().rstrip(":") for ln in text.splitlines()
+                if ln.strip().endswith(":") and not ln.startswith(" ")}
+
+    missing = sections(serve_prompt) - sections(train_prompt)
+    assert not missing, f"serving prompt has sections training never saw: {missing}"
+    assert "conditional" not in serve_prompt, "the model computes the vector; it is not given one"
 
 
 # --------------------------------------------------------------------------- the guard

@@ -71,9 +71,21 @@ def resolved_model() -> str:
 
 
 def build_prompt(payload: dict) -> str:
-    """The same shape as the SFT corpus's pipeline_forecast task."""
+    """The prompt shape the model was TRAINED on, not one invented here.
+
+    scripts/07_build_sft.py's pipeline_forecast task gives the model target features,
+    archive evidence and precedents, and asks it to produce the gate-by-gate outlook and
+    name the bottleneck itself. It is never shown a precomputed forecast.
+
+    An earlier version of this function handed over a "Computed forecast:" block of GBM
+    numbers and told the model they were "not yours to change" - a distribution appearing
+    in no training example. The model would have met it cold at serving time. The numbers
+    the model then writes are discarded by `strip_generated_numbers`, because the GBM's
+    figures are rendered beside the prose and two disagreeing sets of numbers on one page
+    is worse than one.
+    """
     t, f, ev = payload["target"], payload["features"], payload["evidence"]
-    ladder, b = payload["ladder"], payload["bottleneck"]
+    ladder = payload["ladder"]
 
     bits = [f"length: {f['length']} residues"]
     if t.get("organism"):
@@ -90,33 +102,42 @@ def build_prompt(payload: dict) -> str:
                 f"N-terminal, {f['disorder_cterm']:.0%} C-terminal")
     bits.append(f"low-complexity: {f['low_complexity_frac']:.0%}")
 
+    strength = ev.get("strength", "NONE")
+    evidence = (f"  {ev['n_precedents']} uncensored precedents in the 30% cluster, "
+                f"{ev['n_close']} above 70% identity")
+    cens = payload.get("evidence", {}).get("n_censored", 0)
+    total = ev["n_precedents"] + cens
+    if total:
+        evidence += f"\n  {cens / total:.0%} of this cluster's records are censored"
+    evidence += f"\n  evidence strength: {strength}"
+
     rows = ["  target              centre    organism                        reached          note"]
-    for p in payload["precedents"][:8]:
-        stage = ladder[p["max_stage"]] if p.get("max_stage") is not None else "unknown"
-        note = "censored at centre closure" if p.get("censored") else ""
-        rows.append(f"  {p['target_id']:<19} {p['centre']:<9} "
-                    f"{(p.get('organism') or ''):<31} {stage:<16} {note}".rstrip())
+    for p_ in payload["precedents"][:8]:
+        stage = ladder[p_["max_stage"]] if p_.get("max_stage") is not None else "unknown"
+        note = "censored at centre closure" if p_.get("censored") else ""
+        rows.append(f"  {p_['target_id']:<19} {p_['centre']:<9} "
+                    f"{(p_.get('organism') or ''):<31} {stage:<16} {note}".rstrip())
 
-    gates = "\n".join(
-        f"  {ladder[i]} -> {ladder[i+1]}: {payload['conditional'][i]:.2f} conditional, "
-        f"{payload['survival'][i+1]:.2f} cumulative" for i in range(len(payload["conditional"])))
+    return ("Forecast the whole pipeline for this target.\n\n"
+            "Target features:\n" + "\n".join(f"  {b}" for b in bits) + "\n\n"
+            f"Archive evidence:\n{evidence}"
+            + (f"\n\nPrecedents:\n" + "\n".join(rows) if len(rows) > 1 else ""))
 
-    return (
-        "Write the interpretation for this forecast. The numbers are already computed and "
-        "are not yours to change: explain what they mean, name the wall, and say what you "
-        "would do about it.\n\n"
-        f"Target features:\n" + "\n".join(f"  {b_}" for b_ in bits) + "\n\n"
-        f"Archive evidence:\n"
-        f"  {ev['n_precedents']} uncensored precedents above 30% identity, "
-        f"{ev['n_close']} above 70%\n"
-        f"  {ev['n_censored']} retrieved precedents are censored\n"
-        f"  closest identity: {ev['closest_identity']:.0%}\n"
-        f"  evidence strength: {ev['strength']}\n\n"
-        f"Computed forecast:\n{gates}\n\n"
-        f"Predicted bottleneck: {b['name']} -> {b['next']} ({b['action']}), "
-        f"interval {b['interval'][0]:.2f} to {b['interval'][1]:.2f}\n\n"
-        + (f"Precedents:\n" + "\n".join(rows) if len(rows) > 1 else "")
-    )
+
+GATE_LINE = re.compile(r"^\s*\w[\w ]*->[\w ]*:\s*[0-9.]+\s*conditional.*$", re.M)
+PROB_LINE = re.compile(r"^\s*(Gate-by-gate outlook:|Probability of [^:]+:\s*[0-9.]+).*$", re.M)
+
+
+def strip_generated_numbers(text: str) -> tuple[str, bool]:
+    """Remove the model's own probability table, keeping its reasoning.
+
+    Spec 7.4: every number comes from the GBM or DuckDB, and the narrative is the only
+    thing the model writes. The SFT task trains it to emit a full gate vector, so it will;
+    those digits must not reach a reader beside the GBM's own figures.
+    """
+    cleaned = PROB_LINE.sub("", GATE_LINE.sub("", text))
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned, cleaned != text.strip()
 
 
 IDENT_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9]{1,12}-[A-Za-z0-9_.]{1,20}\b")
@@ -160,7 +181,13 @@ def narrate(payload: dict) -> str | None:
         text = r.json()["choices"][0]["message"]["content"].strip()
     except Exception:  # noqa: BLE001
         return None
-    clean, removed = sanitise(text, prompt, payload)
+    clean, stripped = strip_generated_numbers(text)
+    if stripped:
+        payload.setdefault("caveats", []).append(
+            "The model's own probability estimates were removed from the interpretation: "
+            "every figure shown is computed by the gradient-boosted model, not written by "
+            "the language model.")
+    clean, removed = sanitise(clean, prompt, payload)
     if removed:
         payload.setdefault("caveats", []).append(
             f"The model named {len(removed)} identifier(s) that were not in its retrieved "

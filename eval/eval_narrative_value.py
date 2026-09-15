@@ -67,30 +67,22 @@ def mean_pairwise(texts: list[str]) -> float:
     return sum(jaccard(sh[i], sh[j]) for i, j in pairs) / len(pairs)
 
 
-GATE_ROW = re.compile(r"(\w[\w ]*?) -> (\w[\w ]*?): ([0-9.]+) conditional, ([0-9.]+) cumulative")
+BOTTLENECK = re.compile(r"Predicted bottleneck:\s*([\w ]+?)\s*(?:->|\(|\.|$)")
 
 
-def expected_bottleneck(prompt: str) -> str | None:
-    """The gate the prompt's OWN numbers identify as the wall.
+def stated_bottleneck(text: str) -> str | None:
+    """The gate a forecast names as the wall.
 
-    Derived from the gate table in the prompt, never from the reference completion: a
-    check that reads the answer it is marking is not a check. The definition matches the
-    corpus generator exactly (lowest conditional, named by the gate it leaves from), so a
-    model is judged against the same rule that produced its training targets.
+    The pipeline_forecast PROMPT carries no gate table: the model is trained to produce
+    the whole vector itself from features and evidence. So the reference is the held-out
+    completion, and this measure is the specification's own bottleneck top-1 accuracy:
+    does the model name the same wall as the reference answer for that target.
 
-    The first version of this searched the PROMPT for "Predicted bottleneck:", which only
-    ever appears in the COMPLETION, so it scored 0/24 on a corpus that names its gate every
-    single time.
+    The first version searched the prompt for a string that only ever appears in the
+    completion, and duly scored 0/24 against a corpus that names its gate every time.
     """
-    rows = GATE_ROW.findall(prompt)
-    if not rows:
-        return None
-    best, worst = None, 2.0
-    for frm, _to, cond, _cum in rows:
-        c = float(cond)
-        if c < worst:
-            worst, best = c, frm.strip()
-    return best
+    m = BOTTLENECK.search(text)
+    return m.group(1).strip().lower() if m else None
 
 
 def complete(messages, endpoint: str, model: str, max_tokens: int = 320) -> str:
@@ -168,12 +160,18 @@ def main() -> None:
     print("                  (similarity BETWEEN narratives for different targets; "
           "high means the text ignores its input)")
 
-    grounded = 0
+    grounded = agreed = comparable = 0
     for t, rec in zip(texts, sources):
-        want = expected_bottleneck(rec["messages"][1]["content"])
-        if want and want.lower() in t.lower():
+        said = stated_bottleneck(t)
+        ref = stated_bottleneck(rec["messages"][2]["content"])
+        if said:
             grounded += 1
-    print(f"  grounding       {grounded}/{len(texts)} name the bottleneck they were given")
+        if said and ref:
+            comparable += 1
+            agreed += said == ref
+    print(f"  names a wall    {grounded}/{len(texts)}")
+    print(f"  bottleneck top-1 {agreed}/{comparable} agree with the held-out answer"
+          if comparable else "  bottleneck top-1 n/a")
 
     verdict = []
     if resp > 0.60:
@@ -181,7 +179,9 @@ def main() -> None:
     if sum(echo) / len(echo) > 0.70:
         verdict.append("narratives closely match training completions: the template has been memorised")
     if grounded / len(texts) < 0.5:
-        verdict.append("most narratives do not name the bottleneck they were handed")
+        verdict.append("most narratives never name a bottleneck at all")
+    if comparable and agreed / comparable < 0.4:
+        verdict.append("the named wall usually disagrees with the held-out answer")
     print("\n" + ("\n".join("  WARNING: " + v for v in verdict) if verdict
                   else "  no template-echo or unresponsiveness warnings"))
     if not args.dry_run:
@@ -194,7 +194,8 @@ def main() -> None:
         "source": model if args.llm_endpoint else "corpus",
         "n": len(texts), "template_echo_mean": sum(echo) / len(echo),
         "template_echo_max": max(echo), "responsiveness_mean_pairwise": resp,
-        "grounded": grounded, "warnings": verdict,
+        "names_a_wall": grounded, "bottleneck_top1": (agreed / comparable) if comparable else None,
+        "warnings": verdict,
         "samples": texts[:3],
     }, indent=2))
     print(f"\nwrote {OUT / 'narrative_value.json'}")
