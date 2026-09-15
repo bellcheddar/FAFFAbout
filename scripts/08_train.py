@@ -72,6 +72,30 @@ def check_config_keys(cfg: dict) -> list[str]:
     return sorted(k for k in cfg if k not in known)
 
 
+# Values worth sanity-checking against the library's own default, with how far off is
+# tolerable. Round 01 attempt 1 ran at learning_rate 1.0e-4 against mlx-lm's default of
+# 1e-5 and diverged: loss went 0.234 -> 4.831 -> 13.217 within twenty iterations of the
+# warmup ending. Every existing guard passed, because they check that a KEY exists, never
+# that a VALUE is sane.
+VALUE_LIMITS = {"learning_rate": 5.0}
+
+
+def check_config_values(cfg: dict) -> list[str]:
+    """Flag values wildly adrift from what the installed mlx-lm defaults to."""
+    try:
+        from mlx_lm.lora import CONFIG_DEFAULTS  # type: ignore
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for key, factor in VALUE_LIMITS.items():
+        got, default = cfg.get(key), CONFIG_DEFAULTS.get(key)
+        if got is None or not isinstance(default, (int, float)) or not default:
+            continue
+        if got > default * factor:
+            out.append(f"{key}={got:g} is {got/default:.0f}x mlx-lm's default of {default:g}")
+    return out
+
+
 def check_cli_flags(cmd: list[str]) -> list[str]:
     """Flags we construct, checked against the installed parser.
 
@@ -96,6 +120,8 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--skip-preflight", action="store_true", help="only for a deliberate re-launch")
     ap.add_argument("--no-wandb", action="store_true")
+    ap.add_argument("--allow-high-lr", action="store_true",
+                    help="proceed despite a learning rate far above mlx-lm's default")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(CFG.read_text())
@@ -111,6 +137,14 @@ def main() -> None:
         print("   reconcile against the installed version before trusting the run")
         if not args.dry_run:
             sys.exit(1)
+
+    risky = check_config_values(cfg)
+    if risky and not args.allow_high_lr:
+        print("\n!! " + "\n!! ".join(risky))
+        print("   Round 01 attempt 1 diverged at learning_rate 1.0e-4 (10x the default):")
+        print("   loss 0.234 -> 4.831 -> 13.217 within twenty iterations of warmup ending.")
+        print("   Pass --allow-high-lr to proceed deliberately.")
+        sys.exit(1)
 
     run_name = next_run_name(cfg["model"])
     adapter_path = ADAPTERS / run_name
