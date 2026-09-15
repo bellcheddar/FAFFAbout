@@ -308,6 +308,31 @@ The concern is concrete rather than theoretical. Round 01's training loss fell f
 
 Run with `--dry-run` it scores the corpus against itself, which is the floor a model must **beat rather than match**, since the corpus is the templates.
 
+## 🔥 Round 01: a divergence, and what the control proved
+
+The specification prescribes a learning rate of **1e-4**, reasoned as "half the ChemSage rate, because 32 adapted layers rather than 16". That is an argument from another project's hyperparameters rather than from this library's. **mlx-lm's own default is 1e-5**, so the spec runs at ten times it, across 32 layers x 7 projections (41.9M trainable parameters) on an 8-bit base.
+
+It held through warmup and then detonated the moment the rate reached its peak:
+
+| Iteration | Loss at 1e-4 | Loss at 2e-5 |
+|---|---|---|
+| 190 | 0.219 | 0.103 |
+| 200 | 0.239 | 0.109 |
+| 210 | 0.234 | 0.097 |
+| 220 | **4.831** | 0.086 |
+| 230 | **13.217** | 0.084 |
+| 250 | run abandoned | 0.076 |
+
+Keeping the diverged log made this a **controlled comparison** rather than an impression: same seed, same data order, same 32 layers and rank 16, one variable changed. At 2e-5 the run improves straight through the window where the other one died, and reaches a better loss than the diverged run ever managed.
+
+Two guards came out of it, because nothing caught this at launch. `scripts/08_train.py` verified that every config *key* exists in mlx-lm's defaults and that constructed CLI flags are accepted, but never compared a *value* against the library's own default; a learning rate above 5x the default is now a hard stop. And the supervisor gained a divergence tripwire, because **a diverging run is healthy by every process-level measure** (alive, consuming GPU, writing logs on schedule) and the original supervisor would have watched the adapter destroy itself for seven hours.
+
+### What the validation loss can and cannot say
+
+At iteration 250, validation loss is **0.095** against a training loss of 0.086: held-out clusters score as well as training data, so there is no memorisation *penalty*.
+
+That is worth less than it appears. The completions are generated from a small set of Python templates, and **the template is identical across held-out clusters** — so a model that has simply memorised the output format scores exactly this. The loss curve cannot distinguish "learned the task" from "learned the template", which is why `eval/eval_narrative_value.py` exists and why its corpus floor was measured before the model could influence it.
+
 ## 🎓 Roadmap and the science
 
 The full plan is in `PROJECT_PLAN.md` and the specification in `faffabout_build_spec_v1.md`. The parts that matter most:
