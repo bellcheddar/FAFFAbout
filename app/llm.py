@@ -63,11 +63,34 @@ def models() -> list[str]:
 
 
 def resolved_model() -> str:
-    """Whatever the server calls the model, not what we hoped it was called."""
+    """The model we intend to narrate with, never whatever happens to be listed first.
+
+    An earlier version returned `models()[0]`, which looks reasonable and is wrong: on a
+    cold server `GET /v1/models` answers 200 immediately, BEFORE the requested model has
+    loaded, listing mlx-lm's built-in default (Qwen2.5-7B-Instruct-4bit). Taking the first
+    entry therefore names the default, and passing that back as the `model` field makes the
+    server load and serve it. On 2026-09-16 that produced 24 narratives from a model which
+    had never seen this corpus, and they would have scored a flatteringly LOW template echo.
+
+    So prefer the configured name, and fall back to a listed entry only when nothing is
+    configured. `available()` no longer treats a bare model list as readiness.
+    """
     if MODEL_NAME:
         return MODEL_NAME
     m = models()
     return m[0] if m else "faffabout"
+
+
+def serving_intended_model() -> bool:
+    """Is the server actually offering the model we were told to use?
+
+    A 200 from /v1/models is not readiness and the list is not identity. Callers that care
+    which weights answered (every evaluation, and any caller comparing rounds) should gate
+    on this rather than on `available()`.
+    """
+    if not MODEL_NAME:
+        return bool(models())
+    return any(MODEL_NAME in m for m in models())
 
 
 def build_prompt(payload: dict) -> str:

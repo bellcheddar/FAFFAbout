@@ -217,9 +217,32 @@ def test_no_server_means_no_narrative_rather_than_an_error(monkeypatch):
     assert llm.narrate(payload()) is None
 
 
-def test_resolved_model_prefers_what_the_server_reports(monkeypatch):
-    """The model field must match the server's resolved path; a mismatch 404s as an opaque
-    hub-lookup error rather than a clear one."""
+def test_resolved_model_falls_back_to_the_list_only_when_nothing_is_configured(monkeypatch):
+    """With no configured name there is nothing better to use than what the server lists."""
     monkeypatch.setattr(llm, "MODEL_NAME", "")
     monkeypatch.setattr(llm, "models", lambda: ["/Users/x/adapters/faffabout-round01"])
     assert llm.resolved_model() == "/Users/x/adapters/faffabout-round01"
+
+
+def test_the_configured_model_beats_whatever_is_listed_first(monkeypatch):
+    """The regression this locks down, which cost an evaluation on 2026-09-16.
+
+    `GET /v1/models` answers 200 before the requested model has loaded, listing mlx-lm's
+    built-in DEFAULT. Returning models()[0] therefore names Qwen2.5-7B-Instruct-4bit, and
+    passing that back as the `model` field makes the server load and serve it. The result
+    was 24 narratives from a model that had never seen this corpus, which would have scored
+    a flatteringly LOW template echo and read as "not reciting".
+    """
+    monkeypatch.setattr(llm, "MODEL_NAME", "mlx-community/Meta-Llama-3.1-8B-Instruct-8bit")
+    monkeypatch.setattr(llm, "models", lambda: ["mlx-community/Qwen2.5-7B-Instruct-4bit"])
+    assert llm.resolved_model() == "mlx-community/Meta-Llama-3.1-8B-Instruct-8bit"
+
+
+def test_a_server_listing_only_the_default_is_not_serving_our_model(monkeypatch):
+    """Readiness is not identity: a populated model list proves neither."""
+    monkeypatch.setattr(llm, "MODEL_NAME", "mlx-community/Meta-Llama-3.1-8B-Instruct-8bit")
+    monkeypatch.setattr(llm, "models", lambda: ["mlx-community/Qwen2.5-7B-Instruct-4bit"])
+    assert llm.serving_intended_model() is False
+
+    monkeypatch.setattr(llm, "models", lambda: ["mlx-community/Meta-Llama-3.1-8B-Instruct-8bit"])
+    assert llm.serving_intended_model() is True
