@@ -289,6 +289,38 @@ def gate_judgement(r: dict, rng: random.Random, priors: dict[int, float]) -> dic
         {"role": "assistant", "content": assistant}]}
 
 
+def oxford(items: list[str]) -> str:
+    """Join a list the way a person writes one.
+
+    `", ".join(cues[:3])` produced 14,447 targets reading "carries substantial length, a
+    high cysteine count." with no conjunction, which is not English and is exactly the kind
+    of thing a model learns to reproduce.
+    """
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f" and {items[-1]}"
+
+
+def evidence_is_positive(r: dict) -> bool:
+    """Tone from the CLUSTER's record, never from this target's own outcome.
+
+    build_reason used to be called with `reached >= 5` (pipeline_forecast) and
+    `max_stage >= 4` (construct_recommend), so the prose said "comparable targets in this
+    cluster generally get through" precisely when THIS target got through. That is the
+    answer written into the explanation, and at inference there is no answer to read.
+    """
+    n = r.get("n_precedents") or 0
+    k = r.get("n_precedents_cleared")
+    if k is not None and n:
+        return (k / n) >= 0.5
+    base = r.get("cluster_base_rate")
+    return bool(present(base) and base >= 0.5)
+
+
 def censoring_caveat(r: dict) -> str:
     """Spec rule 1: censored is excluded from the loss, present in context, and FLAGGED IN
     OUTPUT. Only the ranking task said so, and the generative eval scored 0 of 19 cases
@@ -297,9 +329,15 @@ def censoring_caveat(r: dict) -> str:
     frac = r.get("cluster_censored_frac") or 0
     if cens:
         n, tot = len(cens), len(r.get("precedents") or [])
-        return (f" Note that {n} of {tot} precedents here are censored: their files closed "
-                "when the centre stopped reporting, so they are evidence of nothing either "
-                "way and the real base is thinner than the count suggests.")
+        # "of the N shown", not "here": the prompt quotes CLUSTER-wide counts while this
+        # sentence counts only the capped list of precedents displayed. Reporting two
+        # populations in one paragraph without saying so made 44,872 targets look as though
+        # they contradicted their own evidence block. The verb agrees, too: 18,201 targets
+        # read "1 of N precedents here are censored".
+        verb = "is" if n == 1 else "are"
+        return (f" Note that {n} of the {tot} precedents shown above {verb} censored: their "
+                "files closed when the centre stopped reporting, so they are evidence of "
+                "nothing either way and the real base is thinner than the count suggests.")
     if frac >= 0.05:
         # a censored share of the cluster is context worth commenting on even when no
         # censored row made it into the eight precedents shown
@@ -333,17 +371,17 @@ def build_reason(r: dict, cleared: bool) -> str:
         head = "Comparable targets in this cluster generally get through"
         if n < 5:
             head = "The precedent is thin, but what there is points the right way"
-        tail = f" despite {', '.join(cues[:2])}" if cues else ""
+        tail = f" despite {oxford(cues[:2])}" if cues else ""
         return f"{head}{tail}."
     head = "The precedent in this cluster is discouraging" if n >= 5 else \
            "There is little precedent here, and the intrinsic properties are unhelpful"
-    tail = f", and this target carries {', '.join(cues[:3])}" if cues else ""
+    tail = f", and this target carries {oxford(cues[:3])}" if cues else ""
     return f"{head}{tail}."
 
 
-def pipeline_forecast(r: dict, rng: random.Random) -> dict:
-    reached = r["max_stage"]
+def pipeline_forecast(r: dict, rng: random.Random, priors: dict[int, float]) -> dict:
     rates = r.get("gate_rates") or {}
+    n_clu = r.get("n_cluster_precedents") or 0
     q = rng.choice(PARAPHRASES["pipeline_forecast"])
     user = (f"{q}\n\nTarget features:\n{fmt_features(r)}\n\n"
             f"Archive evidence:\n{fmt_evidence(r)}"
@@ -351,9 +389,16 @@ def pipeline_forecast(r: dict, rng: random.Random) -> dict:
     lines, surv = [], 1.0
     bottleneck, worst = 0, 1.1
     for g in range(8):
-        cond = rates.get(g)
-        if cond is None:
-            cond = 0.85 if g < reached else 0.35
+        # NEVER `0.85 if g < reached else 0.35`. That filled 37.1% of all gate cells from
+        # this target's OWN max_stage, so 64.7% of forecasts carried the answer in the
+        # numbers, typographically identical to the cells that came from real evidence.
+        # It also contradicted calibrated_p's docstring a hundred lines above, which warns
+        # that fixed values for success and failure teach confident guessing.
+        # A missing cluster rate means "no evidence", and the honest stand-in for no
+        # evidence is the archive-wide rate for that gate, shrunk as calibrated_p shrinks.
+        prior = priors.get(g, 0.5)
+        obs = rates.get(g)
+        cond = prior if obs is None else (obs * n_clu + SHRINKAGE * prior) / (n_clu + SHRINKAGE)
         cond = min(0.97, max(0.05, cond))
         surv *= cond
         lines.append(f"  {LADDER[g]} -> {LADDER[g+1]}: {cond:.2f} conditional, {surv:.2f} cumulative")
@@ -361,9 +406,9 @@ def pipeline_forecast(r: dict, rng: random.Random) -> dict:
             worst, bottleneck = cond, g
     assistant = ("Gate-by-gate outlook:\n" + "\n".join(lines) +
                  f"\n\nPredicted bottleneck: {LADDER[bottleneck]} -> {LADDER[bottleneck+1]}"
-                 f" ({GATE_DESC[bottleneck]}).\n{build_reason(r, reached >= 5)}"
+                 f" ({GATE_DESC[bottleneck]}).\n{build_reason(r, evidence_is_positive(r))}"
                  f"{censoring_caveat(r)}")
-    return {"task": "pipeline_forecast", "messages": [
+    return {"task": "pipeline_forecast", "target_id": r.get("target_id"), "messages": [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": user},
         {"role": "assistant", "content": assistant}]}
@@ -386,13 +431,32 @@ def orthologue_ranking(group: list[dict], rng: random.Random) -> dict | None:
         lines.append(f"  {i}. {p['target_id']}" + (f" ({org})" if org else "")
                      + f" reached {LADDER[p['max_stage']]}")
     n_cens = sum(1 for p in shown if p.get("censored"))
-    caveat = (f"\n\n{n_cens} of these records are censored at centre closure and carry no "
-              "information about tractability; they are ranked last on evidence, not on merit."
-              if n_cens else "")
-    assistant = ("Ranking:\n" + "\n".join(lines) +
-                 f"\n\n{order[0]['target_id']} is the strongest candidate: it is the only one "
-                 f"in this set to reach {LADDER[order[0]['max_stage']]}." + caveat)
-    return {"task": "orthologue_ranking", "messages": [
+    # Both verbs, not just the first: the earlier fix produced "1 of the 3 records shown IS
+    # censored ... and CARRY no information", which is the same agreement error one clause
+    # further along.
+    verb, verb2 = ("is", "carries") if n_cens == 1 else ("are", "carry")
+    caveat = (f"\n\n{n_cens} of the {len(shown)} records shown {verb} censored at centre closure "
+              f"and {verb2} no information about tractability; they are ranked last on evidence, "
+              "not on merit." if n_cens else "")
+
+    # "it is the only one to reach X" was asserted unconditionally and was FALSE in 8,029 of
+    # 18,000 targets (44.6%), because nothing counted ties. Teaching a model to state a
+    # checkable uniqueness claim that is wrong half the time is worse than saying less.
+    top = order[0]
+    top_stage = top["max_stage"] or 0
+    # Count what the READER can see. Excluding censored records from this tally while still
+    # printing them in the ranked list left 32 targets asserting "the only one to reach
+    # soluble" directly above two rows that both read "reached soluble". The claim has to
+    # be true of the list as displayed, not of a subset the sentence never mentions.
+    n_at_top = sum(1 for p in shown if (p["max_stage"] or 0) == top_stage)
+    if n_at_top == 1:
+        lead = (f"{top['target_id']} is the strongest candidate: it is the only one in this "
+                f"set to reach {LADDER[top_stage]}.")
+    else:
+        lead = (f"{top['target_id']} ranks first of the {n_at_top} candidates that reached "
+                f"{LADDER[top_stage]}, which is as far as any of them got.")
+    assistant = "Ranking:\n" + "\n".join(lines) + f"\n\n{lead}" + caveat
+    return {"task": "orthologue_ranking", "target_id": top["target_id"], "messages": [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": user},
         {"role": "assistant", "content": assistant}]}
@@ -431,9 +495,11 @@ def construct_recommend(r: dict, rng: random.Random) -> dict | None:
                      + ".")
     if (r.get("tm_helices") or 0) >= 3:
         parts.append("This is predicted polytopic, so expect detergent screening to dominate the effort.")
-    assistant = ("\n".join(parts) + "\n" + build_reason(r, (r.get("max_stage") or 0) >= 4)
+    # was build_reason(r, max_stage >= 4): the prose tone was set by whether THIS target got
+    # through, which is the answer, and at inference there is no answer to read.
+    assistant = ("\n".join(parts) + "\n" + build_reason(r, evidence_is_positive(r))
                  + censoring_caveat(r))
-    return {"task": "construct_recommend", "messages": [
+    return {"task": "construct_recommend", "target_id": r.get("target_id"), "messages": [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": user},
         {"role": "assistant", "content": assistant}]}
@@ -447,7 +513,12 @@ def failure_attribution(r: dict, rng: random.Random) -> dict | None:
     assistant = (build_reason(r, False) + " In this archive it stopped at "
                  f"{LADDER[r['max_stage']]}, which is consistent with that reading."
                  + censoring_caveat(r))
-    return {"task": "failure_attribution", "messages": [
+    # build_reason(r, False) is NOT leakage to remove: this task is gated on max_stage <= 3
+    # and exists to explain a failure that has already happened, so a negative frame is the
+    # task rather than a peek at the answer. The line below that states the observed stage
+    # is a genuine open question though, since the prompt never supplies it and a model
+    # asked this at inference would have to invent one. Flagged for Marc, not changed here.
+    return {"task": "failure_attribution", "target_id": r.get("target_id"), "messages": [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": user},
         {"role": "assistant", "content": assistant}]}
@@ -596,7 +667,7 @@ def main() -> None:
                 records.append(rec); made["gate_judgement"] += 1
         if made["pipeline_forecast"] < quota["pipeline_forecast"] and r["target_id"] not in seen_forecast:
             seen_forecast.add(r["target_id"])
-            records.append(pipeline_forecast(r, rng)); made["pipeline_forecast"] += 1
+            records.append(pipeline_forecast(r, rng, priors)); made["pipeline_forecast"] += 1
         if made["construct_recommend"] < quota["construct_recommend"]:
             rec = construct_recommend(r, rng)
             if rec:
@@ -638,7 +709,7 @@ def main() -> None:
             r["precedents"] = [p for p in by_cluster.get(cid, []) if p["target_id"] != r["target_id"]][:8] if cid else []
             r["gate_rates"] = gate_rates.get(r["target_id"], {})
             for name, fn in (("gate_judgement", lambda: gate_judgement(r, rng, priors)),
-                             ("pipeline_forecast", lambda: pipeline_forecast(r, rng)),
+                             ("pipeline_forecast", lambda: pipeline_forecast(r, rng, priors)),
                              ("construct_recommend", lambda: construct_recommend(r, rng)),
                              ("failure_attribution", lambda: failure_attribution(r, rng))):
                 if made_eval[name] < quota_eval[name] and len(out) < n:
