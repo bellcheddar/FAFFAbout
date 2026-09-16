@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """08_train.py: launch the LoRA fine-tune, with the checks that stop a wasted night.
 
-Wraps `mlx_lm lora` rather than replacing it, and does four things the bare command will
+Wraps `mlx_lm lora` rather than replacing it, and does five things the bare command will
 not:
 
   1. runs scripts/preflight.sh and refuses to launch on a failure
@@ -11,6 +11,8 @@ not:
      adapter_path and offers no override
   4. picks the next round number by globbing the adapters directory, so a deleted round is
      never reissued and the counter cannot drift from what is on disk
+  5. refuses to launch from a shell at nonzero nice, because the trainer inherits it and
+     the demotion cannot be undone afterwards without root
 
 Resume note: a resume restarts the iteration counter AND the learning-rate schedule, so
 pass the REMAINING budget as --iters and record the offset for reporting.
@@ -23,6 +25,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -96,6 +99,28 @@ def check_config_values(cfg: dict) -> list[str]:
     return out
 
 
+def check_priority() -> int:
+    """The scheduling priority this process will hand to the trainer.
+
+    Round 01 spent its entire first night at nice 5, inherited from the session that
+    launched it. Every check in this file passed, because they all ask whether the
+    CONFIGURATION is sane and none asks whether the process can actually get CPU.
+
+    A nice-5 child cannot outrank ordinary nice-0 work. The run fell to 0.9% CPU and
+    204 s/iter on a machine sitting at load 13, an ETA of 3.8 days, while the loss curve,
+    the process and the log all looked perfectly healthy: the only symptom was iterations
+    counted against a clock.
+
+    It cannot be repaired afterwards from an unprivileged process. `renice` needs root to
+    LOWER a nice value, `taskpolicy -B` reports success while changing nothing, and a
+    relaunch simply inherits the demotion again.
+    """
+    try:
+        return os.nice(0)  # returns the current value without changing it
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def check_cli_flags(cmd: list[str]) -> list[str]:
     """Flags we construct, checked against the installed parser.
 
@@ -122,9 +147,24 @@ def main() -> None:
     ap.add_argument("--no-wandb", action="store_true")
     ap.add_argument("--allow-high-lr", action="store_true",
                     help="proceed despite a learning rate far above mlx-lm's default")
+    ap.add_argument("--allow-low-priority", action="store_true",
+                    help="proceed despite a demoted (nonzero nice) launching shell")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(CFG.read_text())
+
+    # Deliberately OUTSIDE the preflight block: --skip-preflight exists for a considered
+    # relaunch, which is exactly the moment someone in a hurry would skip past this.
+    nice = check_priority()
+    if nice and not args.allow_low_priority:
+        print(f"\n!! this process runs at nice {nice}, and the trainer inherits it.")
+        print("   A nice-5 child cannot outrank ordinary nice-0 work. Round 01 fell to")
+        print("   0.9% CPU and 204 s/iter on an idle machine (an ETA of 3.8 days) while")
+        print("   every other check here reported the run perfectly healthy.")
+        print("   Launch from a real Terminal, or repair a RUNNING job in place with:")
+        print("     sudo renice -n 0 -p <pid>")
+        print("   Pass --allow-low-priority to proceed deliberately.")
+        sys.exit(1)
 
     if not args.skip_preflight:
         print("running preflight ...")

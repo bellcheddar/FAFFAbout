@@ -40,6 +40,24 @@ if [[ -n "$(ls -A /Library/Updates 2>/dev/null | grep -v '^\.')" ]]; then
   warn "a staged macOS update in /Library/Updates generates background work until installed"
 else ok "no staged macOS update"; fi
 
+# --- scheduling priority ----------------------------------------------------------------
+# Round 01 spent its entire first night at nice 5, inherited from the agent session that
+# launched it, and nothing noticed until throughput was timed against a clock. A nice-5
+# process cannot outrank ordinary nice-0 work: the run fell to 0.9% CPU and 204 s/iter on a
+# machine sitting at load 13, an ETA of 3.8 days. Children inherit this, so a job launched
+# from a demoted shell is crippled before it starts, and it cannot be undone afterwards
+# without root, because renice needs privilege to LOWER a value and taskpolicy -B reports
+# success while changing nothing.
+MY_NICE=$(ps -o nice= -p $$ 2>/dev/null | tr -d ' ')
+# A warning rather than a failure ON PURPOSE: 08_train.py hard-stops on this, and if both
+# refused, the --allow-low-priority override could only be used together with
+# --skip-preflight, throwing away every other check to get past the one you had knowingly
+# accepted. The launcher is the gate; this is the notice.
+if [[ -n "${MY_NICE:-}" && "${MY_NICE}" -ne 0 ]]; then
+  warn "this shell is at nice ${MY_NICE}: anything it launches is demoted and will lose to ordinary background work"
+  warn "launch training from a real Terminal; repair a running job with: sudo renice -n 0 -p <pid>"
+else ok "scheduling priority normal (nice ${MY_NICE:-0})"; fi
+
 # --- CPU starvation -------------------------------------------------------------------
 # MLX training is GPU-bound but needs CPU to feed the GPU. During round 01 the machine hit
 # load 42 on 10 cores and the run fell to 29 s/iter against a reported 14.7 s/iter, losing

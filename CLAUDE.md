@@ -33,17 +33,22 @@ Spec: `faffabout_build_spec_v1.md` (source of truth). Live status: `PROJECT_PLAN
 - **`timeout` and `gtimeout` do not exist here** (BSD userland, no coreutils). Wrapping a
   command in `timeout` returns 127 and the command never runs, which silently voids
   whatever the check was meant to prove.
-- **Everything launched from the agent session inherits nice 5, including training.** The
-  round 01 trainer, its `08_train.py` parent, `wandb-core` and even a bare `sleep` all ran
-  at nice 5; our code never asks for it. This is survivable on an idle machine and crippling
-  under competition, because a nice-5 process cannot outrank ordinary nice-0 work: the run
-  fell to 0.9% CPU and roughly 200 s/iter while the machine sat at load 13. It also explains
-  shell oddities in this session, such as a `sleep 60` taking sixteen minutes. **`renice`
-  cannot undo it** (lowering a nice value needs root, and `sudo` has no TTY here) and
-  `taskpolicy -B` reports success while changing nothing. Relaunching does not help either,
-  since the child inherits it again. The fix is Marc's, in a real Terminal:
-  `sudo renice -n 0 -p <pid>` on the running job. **Check `ps -o nice` early on any run that
-  looks slow for no reason**, and prefer launching long training from a real Terminal.
+- **Any detached/background job started from here lands at nice 5, whatever the parent.**
+  Measured, after two wrong guesses: a foreground tool call is nice 0, but a `nohup ... &`
+  child spawned *from that same nice-0 shell* comes back nice 5. So it is not inherited from
+  the session and it is not a foreground/background property of the tool call: detaching is
+  what demotes it. Confirmed across the round 01 trainer, its `08_train.py` parent,
+  `wandb-core`, and `spotlight_reaper.sh`, all at nice 5, with our code never asking for it.
+  A nice-5 process cannot outrank ordinary nice-0 work: the run fell to 0.9% CPU and
+  204 s/iter while the machine sat at load 13, an ETA of 3.8 days. It also explains a
+  `sleep 60` in a background task taking sixteen minutes.
+  **There is no way to launch a long job from here that avoids this**, and it cannot be
+  undone afterwards: `renice` needs root to LOWER a value, `sudo` has no TTY, and
+  `taskpolicy -B` reports success while changing nothing. The only repair is Marc's, in a
+  real Terminal: `sudo renice -n 0 -p <pid>`, which fixes a RUNNING job in place with
+  nothing lost. `08_train.py` now hard-stops on nonzero nice (`--allow-low-priority` to
+  override), verified under `nice -n 5`. **Check `ps -o nice` early on any run that is
+  slow for no visible reason**: every other signal will look healthy.
 - **An empty filter result is not evidence of absence.** A process check printed "nothing
   above 1%" directly beneath an 84.9% `spotlightknowledged` process, because the pattern
   said `Spotlight` and the process is lower case. The same hand-maintained name list is
