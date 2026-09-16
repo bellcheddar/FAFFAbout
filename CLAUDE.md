@@ -33,6 +33,17 @@ Spec: `faffabout_build_spec_v1.md` (source of truth). Live status: `PROJECT_PLAN
 - **`timeout` and `gtimeout` do not exist here** (BSD userland, no coreutils). Wrapping a
   command in `timeout` returns 127 and the command never runs, which silently voids
   whatever the check was meant to prove.
+- **Everything launched from the agent session inherits nice 5, including training.** The
+  round 01 trainer, its `08_train.py` parent, `wandb-core` and even a bare `sleep` all ran
+  at nice 5; our code never asks for it. This is survivable on an idle machine and crippling
+  under competition, because a nice-5 process cannot outrank ordinary nice-0 work: the run
+  fell to 0.9% CPU and roughly 200 s/iter while the machine sat at load 13. It also explains
+  shell oddities in this session, such as a `sleep 60` taking sixteen minutes. **`renice`
+  cannot undo it** (lowering a nice value needs root, and `sudo` has no TTY here) and
+  `taskpolicy -B` reports success while changing nothing. Relaunching does not help either,
+  since the child inherits it again. The fix is Marc's, in a real Terminal:
+  `sudo renice -n 0 -p <pid>` on the running job. **Check `ps -o nice` early on any run that
+  looks slow for no reason**, and prefer launching long training from a real Terminal.
 - **An empty filter result is not evidence of absence.** A process check printed "nothing
   above 1%" directly beneath an 84.9% `spotlightknowledged` process, because the pattern
   said `Spotlight` and the process is lower case. The same hand-maintained name list is
