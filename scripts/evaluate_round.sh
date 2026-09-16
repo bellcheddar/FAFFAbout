@@ -74,7 +74,16 @@ trap cleanup EXIT
 #
 # A 200 is not readiness and a model list is not identity. The only honest probe is a real
 # completion for the model we actually intend to score.
-MID="$MODEL"
+# WHICH NAME ATTACHES THE ADAPTER. mlx_lm/server.py:316 registers --adapter-path under the
+# literal key "default_model":
+#     self._adapter_map["default_model"] = self.cli_args.adapter_path
+#     adapter_path = self._adapter_map.get(model_path, adapter_path)   # line 389
+# so a request naming the BASE model misses that entry, resolves adapter_path=None, and
+# line 393 loads a SECOND, un-adapted copy under a different model_key. On 2026-09-16 that
+# scored the base model at template echo 0.003 against a 0.554 floor and read as a triumph:
+# "the fine-tune isn't reciting at all". The adapter was fine; nothing was attached to it.
+# Asserting the model NAME cannot catch this, because the name is genuinely correct.
+MID="default_model"
 READY=0
 for _ in $(seq 1 240); do
   if curl -sf "http://127.0.0.1:$PORT/v1/chat/completions" -H 'Content-Type: application/json' \

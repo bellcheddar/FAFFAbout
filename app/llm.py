@@ -28,7 +28,14 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 ENDPOINT = os.environ.get("FAFFABOUT_LLM", "http://127.0.0.1:8080/v1")
-MODEL_NAME = os.environ.get("FAFFABOUT_LLM_MODEL", "")
+# "default_model" is the only name that attaches the adapter. mlx_lm/server.py:316 registers
+# --adapter-path under that literal key, and line 389 looks the adapter up BY THE REQUESTED
+# MODEL NAME, so naming the base model resolves adapter_path=None and loads a second,
+# un-adapted copy. On 2026-09-16 that served plain Llama for a whole evaluation while every
+# name-based check passed, because the name was genuinely correct. Verify by OUTPUT, never
+# by identity: the adapted model is terse and in-register, the base model opens with
+# "I can simulate a protein attrition forecast...".
+MODEL_NAME = os.environ.get("FAFFABOUT_LLM_MODEL", "default_model")
 TIMEOUT = float(os.environ.get("FAFFABOUT_LLM_TIMEOUT", "45"))
 MAX_TOKENS = 320
 

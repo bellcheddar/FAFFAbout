@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
 from pathlib import Path
 
@@ -142,23 +143,50 @@ def fmt_features(r: dict) -> str:
     bits = [
         f"length: {r['seq_len']} residues" if r.get("seq_len") else None,
         f"organism: {clean_organism(r.get('organism'))}" if clean_organism(r.get("organism")) else None,
-        f"kingdom: {r['superkingdom']}" if r.get("superkingdom") else None,
-        f"centre: {r['centre']}" if r.get("centre") else None,
-        f"pI: {r['pi']:.2f}" if r.get("pi") is not None else None,
-        f"GRAVY: {r['gravy']:.3f}" if r.get("gravy") is not None else None,
-        f"net charge at pH 7: {r['net_charge_ph7']:+.1f}" if r.get("net_charge_ph7") is not None else None,
-        f"cysteines: {r['cys_count']}" if r.get("cys_count") is not None else None,
-        f"predicted TM helices: {r['tm_helices']}" if r.get("tm_helices") is not None else None,
+        f"kingdom: {r['superkingdom']}" if present(r.get("superkingdom")) else None,
+        f"centre: {r['centre']}" if present(r.get("centre")) else None,
+        f"pI: {r['pi']:.2f}" if present(r.get("pi")) else None,
+        f"GRAVY: {r['gravy']:.3f}" if present(r.get("gravy")) else None,
+        f"net charge at pH 7: {r['net_charge_ph7']:+.1f}" if present(r.get("net_charge_ph7")) else None,
+        f"cysteines: {r['cys_count']}" if present(r.get("cys_count")) else None,
+        f"predicted TM helices: {r['tm_helices']}" if present(r.get("tm_helices")) else None,
         "signal peptide predicted" if r.get("signal_peptide") else None,
+        # All three disorder fields are interpolated, so all three must be present: guarding
+        # on disorder_frac alone let a NaN N- or C-terminal value through as "nan%".
         f"disorder: {r['disorder_frac']:.0%} overall, {r['disorder_nterm']:.0%} N-terminal, "
-        f"{r['disorder_cterm']:.0%} C-terminal" if r.get("disorder_frac") is not None else None,
-        f"low-complexity: {r['low_complexity_frac']:.0%}" if r.get("low_complexity_frac") is not None else None,
-        f"archive annotation: {r['protein_types']}" if r.get("protein_types") else None,
-        f"construct type: {r['target_construct_type']}" if r.get("target_construct_type") else None,
-        f"host: {r['host']}" if r.get("host") else None,
-        f"tag: {r['tag']}" if r.get("tag") else None,
+        f"{r['disorder_cterm']:.0%} C-terminal" if all(
+            present(r.get(k)) for k in ("disorder_frac", "disorder_nterm", "disorder_cterm")) else None,
+        f"low-complexity: {r['low_complexity_frac']:.0%}" if present(r.get("low_complexity_frac")) else None,
+        f"archive annotation: {r['protein_types']}" if present(r.get("protein_types")) else None,
+        f"construct type: {r['target_construct_type']}" if present(r.get("target_construct_type")) else None,
+        f"host: {r['host']}" if present(r.get("host")) else None,
+        f"tag: {r['tag']}" if present(r.get("tag")) else None,
     ]
     return "\n".join(f"  {b}" for b in bits if b)
+
+
+def present(v) -> bool:
+    """Is this value actually there?
+
+    `float('nan')` is TRUTHY and is not None, so it defeats both `if r.get('x')` and
+    `if r.get('x') is not None`. Every guard in this file used one of those, and pandas
+    hands NaN back for any missing numeric or string column, so the absent values sailed
+    straight into f-strings. `:.2f` and `:.0%` render NaN as "nan" rather than raising.
+
+    The result, measured on 2026-09-16: 10,391 TRAINING TARGETS (8.7%) contained the literal
+    string, teaching the model to write it as though it were a protocol choice:
+
+        Tag: nan, cleaved with nan.          8,304 targets
+        Host: nan, following the precedent.  4,609 targets
+
+    This is the same shape as the DNA-in-the-protein-column bug: a value that looks present,
+    is not, and passes every check that asks "is it there?" instead of "is it valid?".
+    """
+    if v is None:
+        return False
+    if isinstance(v, float) and math.isnan(v):
+        return False
+    return str(v).strip().casefold() not in ("", "nan", "none", "<na>")
 
 
 JUNK_ORGANISM = {"", "other", "unknown", "unidentified", "n/a", "na", "none", "synthetic construct"}
@@ -359,7 +387,10 @@ def orthologue_ranking(group: list[dict], rng: random.Random) -> dict | None:
 
 
 def construct_recommend(r: dict, rng: random.Random) -> dict | None:
-    if not (r.get("host") or r.get("tag")):
+    # A record whose host and tag are BOTH NaN used to pass this gate, because NaN is
+    # truthy, and then produced a target reading "Host: nan ... Tag: nan, cleaved with nan."
+    # That is why construct_recommend was the worst-affected task at 86% of held-out cases.
+    if not (present(r.get("host")) or present(r.get("tag"))):
         return None
     q = rng.choice(PARAPHRASES["construct_recommend"])
     user = (f"{q}\n\nTarget features:\n{fmt_features(r)}\n\nArchive evidence:\n{fmt_evidence(r)}")
@@ -372,7 +403,7 @@ def construct_recommend(r: dict, rng: random.Random) -> dict | None:
         if dc > 0.5:
             trim.append("trim the disordered C-terminus")
         parts.append("Boundaries: " + " and ".join(trim) + ".")
-    elif r.get("construct_start") and r.get("construct_end"):
+    elif present(r.get("construct_start")) and present(r.get("construct_end")):
         parts.append(f"Boundaries: residues {r['construct_start']} to {r['construct_end']}, "
                      "which is what worked in this cluster.")
     elif (r.get("target_construct_type") or "").startswith("truncated"):
@@ -380,10 +411,12 @@ def construct_recommend(r: dict, rng: random.Random) -> dict | None:
                      "the archive does not record which residues.")
     else:
         parts.append("Boundaries: start with the full-length ORF; there is no precedent for a truncation here.")
-    if r.get("host"):
+    if present(r.get("host")):
         parts.append(f"Host: {r['host']}, following the precedent in this cluster.")
-    if r.get("tag"):
-        parts.append(f"Tag: {r['tag']}" + (f", cleaved with {r['protease']}" if r.get("protease") else "") + ".")
+    if present(r.get("tag")):
+        parts.append(f"Tag: {r['tag']}"
+                     + (f", cleaved with {r['protease']}" if present(r.get("protease")) else "")
+                     + ".")
     if (r.get("tm_helices") or 0) >= 3:
         parts.append("This is predicted polytopic, so expect detergent screening to dominate the effort.")
     assistant = ("\n".join(parts) + "\n" + build_reason(r, (r.get("max_stage") or 0) >= 4)
