@@ -221,7 +221,14 @@ def fmt_evidence(r: dict) -> str:
     strength = "STRONG" if n >= 20 and close >= 3 else "MODERATE" if n >= 5 else "WEAK"
     line = f"  {n} uncensored precedents in the 30% cluster, {close} above 70% identity"
     if cens is not None:
-        line += f"\n  {cens:.0%} of this cluster's records are censored"
+        # Omit rather than render. cluster_censored_frac is a ratio over TRAINING-split
+        # members of the cluster (05_derive_features.py:323), and the 30% identity split
+        # makes held-out clusters disjoint from training ones, so n_train = 0 and the CASE
+        # returns NULL for every held-out row. That is the leave-one-out discipline working,
+        # not missing data: there is genuinely no training precedent to average. Printing it
+        # as "nan% of this cluster's records are censored" put a broken-looking statistic in
+        # front of the model in 100% of valid and test prompts.
+        line += f"\n  {cens:.0%} of this cluster's records are censored" if present(cens) else ""
     return f"{line}\n  evidence strength: {strength}"
 
 
@@ -263,8 +270,13 @@ def gate_judgement(r: dict, rng: random.Random, priors: dict[int, float]) -> dic
     user = (f"{q}\n\nTarget features:\n{fmt_features(r)}\n\n"
             f"Gate under consideration: {LADDER[g]} -> {LADDER[g+1]} ({GATE_DESC[g]})\n\n"
             f"Archive evidence:\n{fmt_evidence(r)}"
+            # Same structural absence as cluster_censored_frac: cluster_base_rate is a ratio
+            # over TRAINING-split cluster members, and held-out clusters have none, so it is
+            # NULL for 100% of valid and test rows. Omit the clause instead of printing
+            # "historical clearance of this gate in this cluster: nan%", which appeared in
+            # 900 prompts. present() rejects NaN, which is truthy and is-not-None.
             + (f"\n  historical clearance of this gate in this cluster: {base:.0%}"
-               if base is not None else "")
+               if present(base) else "")
             + (f"\n\nPrecedents:\n{fmt_precedents(r['precedents'])}" if r.get("precedents") else ""))
     p = calibrated_p(r, priors)
     reason = build_reason(r, p >= 0.5)
