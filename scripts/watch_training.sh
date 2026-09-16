@@ -33,7 +33,11 @@ LOG=${1:-data/train_round01.log}
 INTERVAL=${2:-90}
 DISK_MIN_GB=${DISK_MIN_GB:-5}
 CORES=$(sysctl -n hw.ncpu 2>/dev/null || echo 8)
-STARVE_AT=$(echo "$CORES * 2" | bc)
+# Override with STARVE_LOAD, and set it absurdly high to silence the check entirely.
+# Once starvation is DIAGNOSED and its remedy is known but out of reach (it needed root
+# during round 01), repeating the alert every few minutes only wakes the supervisor's
+# reader and takes CPU from the very job being starved. An alert you cannot act on is noise.
+STARVE_AT=${STARVE_LOAD:-$(echo "$CORES * 2" | bc)}
 
 [[ -f "$LOG" ]] || { echo "no such log: $LOG"; exit 2; }
 
