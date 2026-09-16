@@ -20,6 +20,7 @@ returns an opaque hub-lookup 404 rather than a clear error.
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 from pathlib import Path
@@ -48,6 +49,16 @@ SYSTEM = (
     "You never invent a target identifier, a PDB code or a precedent that is not in the "
     "context you were given."
 )
+
+def _finite(v) -> bool:
+    """Is this value safe to render?
+
+    NaN does not raise when formatted, it prints: "disorder: nan% overall" is text a reader
+    cannot tell apart from a measurement. `bool` is excluded because it is an int subclass
+    and True would otherwise format as a percentage.
+    """
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
 
 _MODELS_CACHE: list[str] | None = None
 
@@ -122,15 +133,28 @@ def build_prompt(payload: dict) -> str:
         bits.append(f"organism: {t['organism']}")
     if f.get("superkingdom"):
         bits.append(f"kingdom: {f['superkingdom']}")
-    bits += [f"pI: {f['pI']}", f"GRAVY: {f['gravy']}",
-             f"net charge at pH 7: {f['net_charge_ph7']:+}",
-             f"cysteines: {f['cys_count']}",
+    # These three were missed by the first pass because it grepped for ":.0%" and these use
+    # a bare {f['pI']}, which formats NaN just as silently. A live check found "pI: nan",
+    # "GRAVY: nan" and "net charge at pH 7: +nan" still reaching the prompt after the
+    # disorder lines had been guarded. Fixing only the sites a search pattern happened to
+    # match is how a partial fix passes for a complete one.
+    for key, label in (("pI", "pI"), ("gravy", "GRAVY")):
+        if _finite(f.get(key)):
+            bits.append(f"{label}: {f[key]}")
+    if _finite(f.get("net_charge_ph7")):
+        bits.append(f"net charge at pH 7: {f['net_charge_ph7']:+}")
+    bits += [f"cysteines: {f['cys_count']}",
              f"predicted TM helices: {f['tm_helices']}"]
     if f.get("signal_peptide"):
         bits.append("signal peptide predicted")
-    bits.append(f"disorder: {f['disorder_frac']:.0%} overall, {f['disorder_nterm']:.0%} "
-                f"N-terminal, {f['disorder_cterm']:.0%} C-terminal")
-    bits.append(f"low-complexity: {f['low_complexity_frac']:.0%}")
+    # Defence in depth. resolve.py rejects the sequences that produce NaN, but NaN does not
+    # raise here, it RENDERS: "disorder: nan% overall" is text a reader cannot distinguish
+    # from a measurement. Omit rather than print, the same rule as the corpus builder.
+    if all(_finite(f.get(k)) for k in ("disorder_frac", "disorder_nterm", "disorder_cterm")):
+        bits.append(f"disorder: {f['disorder_frac']:.0%} overall, {f['disorder_nterm']:.0%} "
+                    f"N-terminal, {f['disorder_cterm']:.0%} C-terminal")
+    if _finite(f.get("low_complexity_frac")):
+        bits.append(f"low-complexity: {f['low_complexity_frac']:.0%}")
 
     strength = ev.get("strength", "NONE")
     evidence = (f"  {ev['n_precedents']} uncensored precedents in the 30% cluster, "

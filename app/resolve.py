@@ -23,6 +23,38 @@ UNIPROT_RE = re.compile(r"^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A
 PDB_RE = re.compile(r"^([1-9][A-Za-z0-9]{3})(?:[_.:\-]([A-Za-z0-9]{1,4}))?$")
 AA_OK = set("ACDEFGHIKLMNPQRSTVWYBXZUO*")
 
+# The twenty that carry a value on every composition scale. B (Asx), Z (Glx), X (unknown),
+# U (selenocysteine), O (pyrrolysine) and * (stop) are accepted into the sequence but
+# contribute to no scale, so a sequence made only of those divides by zero.
+#
+# Measured 2026-09-16: an all-X 30-mer is accepted by from_fasta and yields EIGHT NaN
+# features (pI, GRAVY, net charge and all five composition fractions). NaN does not raise,
+# it renders, so the user gets a 200 with "pI: nan" in the prompt, and the booster receives
+# 11 of its 37 features as missing and answers from a learned default split: a confident
+# forecast computed from no sequence information at all. The boundary is exact - ONE
+# standard residue among thirty-nine X's makes every scale finite - so this is a single
+# empty-denominator case, not a general problem with masked sequences.
+STANDARD_AA = set("ACDEFGHIKLMNPQRSTVWY")
+
+
+def n_standard(seq: str) -> int:
+    """How many residues actually contribute to the composition scales."""
+    return sum(c in STANDARD_AA for c in seq)
+
+
+def assert_scoreable(seq: str) -> None:
+    """Refuse a sequence no feature can be computed from.
+
+    Called from all three entry points rather than from_fasta alone: from_uniprot and
+    from_pdb build Resolved directly, and a PDB chain of UNK residues maps to poly-X, which
+    is a routine low-resolution model rather than a pathological paste.
+    """
+    if not n_standard(seq):
+        raise ResolveError(
+            "that sequence contains no standard amino acids, only placeholders such as X, "
+            "B, Z, U, O or *. pI, hydropathy, charge and composition cannot be computed "
+            "from it, so a forecast would be built on nothing.")
+
 UNIPROT_URL = "https://rest.uniprot.org/uniprotkb/{acc}.json"
 RCSB_ENTRY = "https://data.rcsb.org/rest/v1/core/entry/{pdb}"
 RCSB_ENTITY = "https://data.rcsb.org/rest/v1/core/polymer_entity/{pdb}/{entity}"
@@ -99,6 +131,7 @@ def from_fasta(text: str) -> Resolved:
     seq, warnings = clean_sequence(body)
     if len(seq) < 20:
         raise ResolveError(f"sequence is only {len(seq)} residues; at least 20 are needed")
+    assert_scoreable(seq)
     name = header.split("|")[-1].strip() if header else ""
     return Resolved(sequence=seq, source="fasta", name=name, header=header, warnings=warnings)
 
@@ -115,6 +148,7 @@ def from_uniprot(token: str, session: requests.Session | None = None) -> Resolve
     seq, warnings = clean_sequence(d.get("sequence", {}).get("value", ""))
     if not seq:
         raise ResolveError(f"{acc} carries no sequence")
+    assert_scoreable(seq)
     if acc != base:
         warnings.append(f"isoform suffix ignored: resolved the canonical sequence for {base}")
     desc = d.get("proteinDescription", {})
@@ -165,6 +199,9 @@ def from_pdb(token: str, session: requests.Session | None = None) -> Resolved:
     ent, auth, seq_raw, ed = chosen
     seq, w = clean_sequence(seq_raw)
     warnings += w
+    # The most reachable route of the three: a chain of UNK residues maps to poly-X, which
+    # is a routine low-resolution model rather than a pathological paste.
+    assert_scoreable(seq)
     if not chain and len(entities) > 1:
         warnings.append(f"{pdb} has {len(entities)} entities; resolved entity {ent} "
                         f"(chain {'/'.join(auth)}). Append a chain, e.g. {pdb}_{auth[0]}, to pick another")
