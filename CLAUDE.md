@@ -45,8 +45,15 @@ Spec: `faffabout_build_spec_v1.md` (source of truth). Live status: `PROJECT_PLAN
   **There is no way to launch a long job from here that avoids this**, and it cannot be
   undone afterwards: `renice` needs root to LOWER a value, `sudo` has no TTY, and
   `taskpolicy -B` reports success while changing nothing. The only repair is Marc's, in a
-  real Terminal: `sudo renice -n 0 -p <pid>`, which fixes a RUNNING job in place with
-  nothing lost. `08_train.py` now hard-stops on nonzero nice (`--allow-low-priority` to
+  real Terminal: `sudo renice -n 0 -p <pid>` (or `sudo taskpolicy -B -p <pid>`), which
+  fixes a RUNNING job in place with nothing lost.
+  The mechanism is the throttled QoS band, not the nice number alone: the threads show
+  PRI `31T`, and on Apple Silicon that band is confined to the two efficiency cores and
+  kept off the eight performance cores. That is why the load average is useless here, and
+  why it looks so wrong: the machine sat at load 8.57 on 10 cores with P-cores free while
+  the trainer got 2.5%. **GPU contention was tested and ruled out** (`ioreg -c
+  AGXAcceleratorG13X` showed Device Utilization 36%, so the GPU was idle waiting for work
+  the trainer could not submit, rather than being fought over). `08_train.py` now hard-stops on nonzero nice (`--allow-low-priority` to
   override), verified under `nice -n 5`. **Check `ps -o nice` early on any run that is
   slow for no visible reason**: every other signal will look healthy.
 - **An empty filter result is not evidence of absence.** A process check printed "nothing
