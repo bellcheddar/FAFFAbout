@@ -136,7 +136,11 @@ def test_serving_prompt_matches_the_training_prompt_shape():
                         "organism": "Escherichia coli", "max_stage": 0, "censored": False}],
         "gate_rates": {},
     }
-    train_prompt = sft.pipeline_forecast(row, random.Random(0))["messages"][1]["content"]
+    # pipeline_forecast gained `priors` when the gate vector stopped being filled from the
+    # target's own max_stage. The values here are irrelevant: this test compares prompt
+    # SHAPE, and the prompt is built before any conditional is computed.
+    priors = {g: 0.5 for g in range(8)}
+    train_prompt = sft.pipeline_forecast(row, random.Random(0), priors)["messages"][1]["content"]
     serve_prompt = llm.build_prompt(payload())
 
     def sections(text):
