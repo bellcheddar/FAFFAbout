@@ -33,6 +33,17 @@ Spec: `faffabout_build_spec_v1.md` (source of truth). Live status: `PROJECT_PLAN
 - **`timeout` and `gtimeout` do not exist here** (BSD userland, no coreutils). Wrapping a
   command in `timeout` returns 127 and the command never runs, which silently voids
   whatever the check was meant to prove.
+- **An empty filter result is not evidence of absence.** A process check printed "nothing
+  above 1%" directly beneath an 84.9% `spotlightknowledged` process, because the pattern
+  said `Spotlight` and the process is lower case. The same hand-maintained name list is
+  duplicated in `preflight.sh` and `spotlight_reaper.sh`, so one stale name blinds all
+  three at once. Match with `tolower()`, and **always print the top consumers unfiltered
+  next to the filtered answer** so a missed name is visible rather than silent.
+- **A starved run looks perfectly healthy.** Round 01 ran at 29 s/iter against a reported
+  14.7 s/iter while macOS indexing held the machine at load 42 on 10 cores. The process was
+  alive, the loss was falling, the log was on schedule and nothing errored: the only signal
+  was iterations counted against the wall clock. Check progress against `date`, not against
+  the trainer's own It/sec, which excludes the time it is being descheduled for.
 - **Never establish process liveness by matching argv.** `pgrep -f X` and `ps | grep X`
   both match the shell running the check, because its own command line contains X, and the
   `[x]` bracket trick only protects grep from itself, not the parent zsh. This produced

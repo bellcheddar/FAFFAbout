@@ -9,7 +9,16 @@
 THRESH=${1:-40}
 # mobileassetd downloads OS assets and models. Safe to signal -- it retries, and the download
 # resuming tomorrow is a far better outcome than it competing with an overnight training run.
-PATTERN='Metadata\.framework|CoreSpotlight|mds_stores|mdworker|MediaAnalysis|photoanalysisd|photolibraryd|AppleNeuralEngine|suggestd|knowledge-agent|mobileassetd'
+# spotlightknowledged(.updater) and hybridsearchd were added after round 01: the machine hit
+# load 42 with spotlightknowledged.updater at 85% CPU, and NONE of the names below matched it,
+# so the reaper and preflight both reported all clear while the run lost 40% of its wall clock.
+# Same family as mds_stores and mdworker, same respawn behaviour.
+#
+# Deliberately still NOT here: ARDAgent's build_hd_index, which sat at 48% during the same
+# window. It belongs to Remote Management rather than to Spotlight, so killing it is Marc's
+# call, not a default. If a run is being starved and this reaper is not enough, that is the
+# next thing to look at.
+PATTERN='Metadata\.framework|CoreSpotlight|spotlightknowledged|hybridsearchd|mds_stores|mdworker|MediaAnalysis|photoanalysisd|photolibraryd|AppleNeuralEngine|suggestd|knowledge-agent|mobileassetd'
 while true; do
   ps -eo pid,pcpu,args | \
     awk -v t="$THRESH" -v p="$PATTERN" \

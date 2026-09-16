@@ -40,6 +40,19 @@ if [[ -n "$(ls -A /Library/Updates 2>/dev/null | grep -v '^\.')" ]]; then
   warn "a staged macOS update in /Library/Updates generates background work until installed"
 else ok "no staged macOS update"; fi
 
+# --- CPU starvation -------------------------------------------------------------------
+# MLX training is GPU-bound but needs CPU to feed the GPU. During round 01 the machine hit
+# load 42 on 10 cores and the run fell to 29 s/iter against a reported 14.7 s/iter, losing
+# about 40% of the wall clock. Nothing failed: the loss curve, the process and the log all
+# looked perfectly healthy, and only comparing iterations against the clock showed it.
+CORES=$(sysctl -n hw.ncpu)
+LOAD1=$(uptime | sed -n 's/.*load averages*: *\([0-9.]*\).*/\1/p')
+if [[ -n "${LOAD1:-}" ]] && (( $(echo "$LOAD1 > $CORES * 2" | bc -l) )); then
+  bad "load average ${LOAD1} on ${CORES} cores: oversubscribed, training will crawl"
+elif [[ -n "${LOAD1:-}" ]] && (( $(echo "$LOAD1 > $CORES" | bc -l) )); then
+  warn "load average ${LOAD1} on ${CORES} cores: something is competing for CPU"
+else ok "load average ${LOAD1:-?} on ${CORES} cores"; fi
+
 # --- Spotlight ----------------------------------------------------------------------
 # sudo has no TTY in an agent session, so this can only report, never fix.
 IDX=$(mdutil -a -s 2>/dev/null | grep -c "Indexing enabled" || true)
@@ -47,11 +60,18 @@ if [[ "${IDX:-0}" -gt 0 ]]; then
   warn "Spotlight indexing is ENABLED on ${IDX} volume(s). In a real Terminal: sudo mdutil -a -i off"
 else ok "Spotlight indexing off"; fi
 
-BUSY=$(ps -Ao pcpu,comm | awk '$1 > 30 && ($2 ~ /mds|mdworker|MediaAnalysis|photoanalysis|CoreSpotlight|mobileassetd/)' | head -5)
+# This pattern has missed real thieves: it was case-sensitive and release-specific, so
+# spotlightknowledged.updater (85% CPU) and ARDAgent's build_hd_index (48%) both slipped
+# through while the check reported all clear during round 01. The top consumers are now
+# printed UNCONDITIONALLY, because an empty filter result must never be the only evidence
+# of absence: that is how a starved run looks healthy.
+BUSY=$(ps -Ao pcpu,comm | awk '$1 > 30 && tolower($2) ~ /mds|mdworker|mediaanalysis|photoanalysis|spotlight|mobileassetd|build_hd_index|ardagent|hybridsearch|backupd|cloudd/' | head -6)
 if [[ -n "$BUSY" ]]; then
   warn "background analysers above 30% CPU:"; echo "$BUSY" | sed 's/^/          /'
   warn "start the reaper: nohup ./scripts/spotlight_reaper.sh 40 >> reaper.log 2>&1 &"
-else ok "no background analyser above 30% CPU"; fi
+else ok "no KNOWN background analyser above 30% CPU (the list below is the real check)"; fi
+printf "        top three CPU consumers, whatever they are called:\n"
+ps -Ao pcpu,comm -r | sed -n '2,4p' | sed 's/^/          /'
 
 # --- data ---------------------------------------------------------------------------
 for f in data/sft/train.jsonl data/sft/valid.jsonl config/train_config.yaml; do
