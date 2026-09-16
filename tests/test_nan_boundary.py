@@ -44,12 +44,39 @@ def test_no_standard_residues_is_refused():
         R.from_fasta(">t\n" + "X" * 30)
 
 
-def test_one_standard_residue_is_enough_to_be_scoreable():
-    """The fix must not reject masked sequences generally: 39 X's and one M is finite."""
-    r = R.from_fasta(">t\n" + "M" + "X" * 39)
-    f = FEATS(r.sequence)
+def test_one_standard_residue_is_finite_but_no_longer_accepted():
+    """The boundary moved deliberately, and this records why.
+
+    One standard residue among thirty-nine X's yields all-FINITE features, so the NaN bug
+    is genuinely fixed at zero. But finite is not the same as informative: those numbers
+    rest on a single residue. The floor is now MIN_SCOREABLE, matching the twenty-residue
+    length floor from_fasta already applied, because a feature computed over standard
+    residues alone has the same basis in a 40-mer with one M as in a 1-mer.
+    """
+    f = FEATS("M" + "X" * 39)
     bad = [k for k, v in f.items() if isinstance(v, float) and not math.isfinite(v)]
     assert bad == [], f"expected all-finite features, got NaN/inf in {bad}"
+    with pytest.raises(R.ResolveError):
+        R.from_fasta(">t\n" + "M" + "X" * 39)
+
+
+def test_twenty_scoreable_residues_is_accepted():
+    """The floor must not reject a legitimately masked sequence that still has a basis."""
+    seq = "MGKIIGIDLGTTNSCVAIM" + "A" + "X" * 30   # 20 standard, 30 placeholders
+    assert R.n_standard(seq) == R.MIN_SCOREABLE
+    r = R.from_fasta(">t\n" + seq)
+    assert r.sequence == seq
+
+
+def test_a_mostly_placeholder_sequence_is_warned_about_not_refused():
+    seq = "MGKIIGIDLGTTNSCVAIM" + "A" + "X" * 30
+    r = R.from_fasta(">t\n" + seq)
+    assert any("placeholder" in w for w in r.warnings), r.warnings
+
+
+def test_an_ordinary_sequence_gets_no_placeholder_warning():
+    r = R.from_fasta(">t\n" + "MGKIIGIDLGTTNSCVAIMDGTTNSCVAIMGKIIGIDLGTT")
+    assert not any("placeholder" in w for w in r.warnings), r.warnings
 
 
 @pytest.mark.parametrize("seq", ["X" * 30, "B" * 30, "Z" * 30, "U" * 30, "XBZUO" * 6])

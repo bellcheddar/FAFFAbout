@@ -42,18 +42,37 @@ def n_standard(seq: str) -> int:
     return sum(c in STANDARD_AA for c in seq)
 
 
-def assert_scoreable(seq: str) -> None:
-    """Refuse a sequence no feature can be computed from.
+# Twenty SCOREABLE residues, matching the twenty-residue floor from_fasta already applies.
+# Every composition feature is computed over standard residues alone, so a 40-mer carrying
+# one methionine rests on exactly the same statistical basis as a 1-mer: rejecting only the
+# zero case fixes the NaN and still lets a forecast be built on almost nothing.
+MIN_SCOREABLE = 20
+
+# Above this share of placeholders the features are honest but thin, so say so rather than
+# refuse: UniProt entries with a few uncertain residues and PDB constructs carrying some UNK
+# are ordinary inputs, not mistakes.
+PLACEHOLDER_WARN_FRAC = 0.2
+
+
+def assert_scoreable(seq: str) -> list[str]:
+    """Refuse a sequence no feature can honestly be computed from; warn about a thin one.
 
     Called from all three entry points rather than from_fasta alone: from_uniprot and
     from_pdb build Resolved directly, and a PDB chain of UNK residues maps to poly-X, which
     is a routine low-resolution model rather than a pathological paste.
+
+    Returns warnings so the caller can surface them; raises only on the hard floor.
     """
-    if not n_standard(seq):
+    n, total = n_standard(seq), len(seq)
+    if n < MIN_SCOREABLE:
         raise ResolveError(
-            "that sequence contains no standard amino acids, only placeholders such as X, "
-            "B, Z, U, O or *. pI, hydropathy, charge and composition cannot be computed "
-            "from it, so a forecast would be built on nothing.")
+            f"only {n} of {total} residues are standard amino acids, and at least "
+            f"{MIN_SCOREABLE} are needed. pI, hydropathy, charge and composition are "
+            "computed from those residues alone, so a forecast would rest on almost nothing.")
+    if total and (total - n) / total > PLACEHOLDER_WARN_FRAC:
+        return [f"{total - n} of {total} residues are placeholders (X, B, Z, U, O or *); "
+                f"every composition feature is computed from the other {n}"]
+    return []
 
 UNIPROT_URL = "https://rest.uniprot.org/uniprotkb/{acc}.json"
 RCSB_ENTRY = "https://data.rcsb.org/rest/v1/core/entry/{pdb}"
@@ -131,7 +150,7 @@ def from_fasta(text: str) -> Resolved:
     seq, warnings = clean_sequence(body)
     if len(seq) < 20:
         raise ResolveError(f"sequence is only {len(seq)} residues; at least 20 are needed")
-    assert_scoreable(seq)
+    warnings += assert_scoreable(seq)
     name = header.split("|")[-1].strip() if header else ""
     return Resolved(sequence=seq, source="fasta", name=name, header=header, warnings=warnings)
 
@@ -148,7 +167,7 @@ def from_uniprot(token: str, session: requests.Session | None = None) -> Resolve
     seq, warnings = clean_sequence(d.get("sequence", {}).get("value", ""))
     if not seq:
         raise ResolveError(f"{acc} carries no sequence")
-    assert_scoreable(seq)
+    warnings += assert_scoreable(seq)
     if acc != base:
         warnings.append(f"isoform suffix ignored: resolved the canonical sequence for {base}")
     desc = d.get("proteinDescription", {})
@@ -201,7 +220,7 @@ def from_pdb(token: str, session: requests.Session | None = None) -> Resolved:
     warnings += w
     # The most reachable route of the three: a chain of UNK residues maps to poly-X, which
     # is a routine low-resolution model rather than a pathological paste.
-    assert_scoreable(seq)
+    warnings += assert_scoreable(seq)
     if not chain and len(entities) > 1:
         warnings.append(f"{pdb} has {len(entities)} entities; resolved entity {ent} "
                         f"(chain {'/'.join(auth)}). Append a chain, e.g. {pdb}_{auth[0]}, to pick another")
