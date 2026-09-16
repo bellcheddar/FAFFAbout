@@ -449,7 +449,20 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-records", type=int, default=120_000)
     ap.add_argument("--seed", type=int, default=42)
+    # Without this the output path was a module constant, so EVERY run overwrote the live
+    # corpus, including a small smoke build. On 2026-09-16 that would have rewritten
+    # data/sft/train.jsonl underneath a training run that was eight hours in. A builder
+    # whose only mode is "replace the thing currently in use" is a foot-gun.
+    ap.add_argument("--out", type=Path, default=None,
+                    help="write elsewhere than data/sft (use for smoke builds while a run is live)")
     args = ap.parse_args()
+    # Rebind before the mkdir below, so every later reference (the mkdir, both writers and
+    # the closing print) uses the override. Adding the flag without this would have been
+    # worse than not adding it: an option that is silently ignored while a smoke build
+    # quietly overwrites the live corpus is precisely the failure this guards against.
+    global OUT
+    if args.out is not None:
+        OUT = args.out
     cfg = yaml.safe_load(CFG.read_text())
     mix = cfg.get("sft", {}).get("mix", {
         "gate_judgement": 0.45, "pipeline_forecast": 0.20, "orthologue_ranking": 0.15,
