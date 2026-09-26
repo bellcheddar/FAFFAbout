@@ -24,6 +24,17 @@ Spec: `faffabout_build_spec_v1.md` (source of truth). Live status: `PROJECT_PLAN
 
 ## Environment
 
+- **Mac Studio (from 2026-09-26): the nice-5 notes below describe the M1.** Here the session
+  arrives over SSH, `sudo` is passwordless, and training is launched through launchd, which
+  runs at nice 0 with P-core access (verified: PRI 37, not `31T`):
+  `launchctl bootstrap gui/$(id -u) <plist>` with `ProcessType Interactive`, `Nice 0`,
+  `RunAtLoad`, and the plist kept OUTSIDE `~/Library/LaunchAgents` so it never re-runs at
+  login. Still check `ps -o nice` on the trainer after every launch.
+- `.venv` is a symlink to a per-machine `.venv.nosync` (never synced by iCloud), built from
+  python.org 3.14.3. A synced venv breaks on any machine without the exact interpreter path.
+- **iCloud placeholders report their full size.** Test the `dataless` flag
+  (`stat -f %Sf`), never the length. A placeholder being fetched concurrently fails reads
+  with `EDEADLK` ("Resource deadlock avoided").
 - Python 3.14 in `.venv` (uv). Run scripts as `.venv/bin/python scripts/NN_name.py`.
 - `mmseqs` on PATH via Homebrew.
 - `ugrep` is aliased as `grep`: it treats the Latin-1 XML as binary and returns nothing.

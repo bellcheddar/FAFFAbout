@@ -97,8 +97,12 @@ for f in data/sft/train.jsonl data/sft/valid.jsonl config/train_config.yaml; do
 done
 
 # iCloud eviction: a dataless file reads as present and stalls the run on first access.
-EVICTED=$(find "$ROOT/data/sft" -type f -exec sh -c 'test $(stat -f %z "$1") -gt 0 || echo "$1"' _ {} \; 2>/dev/null | head -3)
-[[ -n "$EVICTED" ]] && bad "zero-length (possibly evicted) files: $EVICTED" || ok "no evicted data files"
+# It reports its FULL size, so a zero-length test never fires; read the `dataless` flag.
+# mlx-lm loads train, valid AND test at startup: a dataless test.jsonl being fetched
+# concurrently killed round 04's first launch with EDEADLK ("Resource deadlock avoided").
+EVICTED=$(for n in train valid test; do f="$ROOT/data/sft/$n.jsonl"
+  [[ -e "$f" ]] && stat -f '%Sf' "$f" | grep -q dataless && echo "$n.jsonl"; done | tr '\n' ' ')
+[[ -n "$EVICTED" ]] && bad "iCloud placeholders (not downloaded): $EVICTED: cat them to /dev/null first" || ok "no evicted data files"
 
 # --- mlx ----------------------------------------------------------------------------
 if "$ROOT/.venv/bin/python" -c "import mlx_lm" 2>/dev/null; then
