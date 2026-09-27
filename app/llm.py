@@ -29,14 +29,16 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 ENDPOINT = os.environ.get("FAFFABOUT_LLM", "http://127.0.0.1:8080/v1")
-# "default_model" is the only name that attaches the adapter. mlx_lm/server.py:316 registers
-# --adapter-path under that literal key, and line 389 looks the adapter up BY THE REQUESTED
-# MODEL NAME, so naming the base model resolves adapter_path=None and loads a second,
-# un-adapted copy. On 2026-09-16 that served plain Llama for a whole evaluation while every
-# name-based check passed, because the name was genuinely correct. Verify by OUTPUT, never
-# by identity: the adapted model is terse and in-register, the base model opens with
-# "I can simulate a protein attrition forecast...".
+# NO model name attaches the adapter in mlx-lm 0.31.3. server.py:388-389 resolves
+# "default_model" to the repo id BEFORE looking up _adapter_map, which is keyed on the
+# literal "default_model", so the lookup always misses and --adapter-path is never applied.
+# (On 2026-09-16, under an earlier mlx-lm, "default_model" did attach it; naming the base
+# model did not.) Measured 2026-09-26: "default_model" and the base name return identical
+# base-model prose, while a request carrying "adapters": <path> returns the adapted
+# completion. So every request names its adapter, from FAFFABOUT_LLM_ADAPTER. Verify by
+# OUTPUT, never by identity: every name-based check passes while plain Llama answers.
 MODEL_NAME = os.environ.get("FAFFABOUT_LLM_MODEL", "default_model")
+ADAPTER = os.environ.get("FAFFABOUT_LLM_ADAPTER")
 TIMEOUT = float(os.environ.get("FAFFABOUT_LLM_TIMEOUT", "45"))
 MAX_TOKENS = 320
 
@@ -229,6 +231,8 @@ def narrate(payload: dict) -> str | None:
             "messages": [{"role": "system", "content": SYSTEM},
                          {"role": "user", "content": prompt}],
             "max_tokens": MAX_TOKENS, "temperature": 0.2}
+    if ADAPTER:
+        body["adapters"] = ADAPTER
     try:
         r = requests.post(f"{ENDPOINT}/chat/completions", json=body, timeout=TIMEOUT)
         r.raise_for_status()

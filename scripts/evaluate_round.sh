@@ -96,17 +96,32 @@ if [[ "$READY" != "1" ]]; then
   tail -20 data/eval_server.log >&2
   exit 1
 fi
-SERVED=$(curl -s "http://127.0.0.1:$PORT/v1/models" \
-         | $PY -c "import json,sys;print(' '.join(m['id'] for m in json.load(sys.stdin)['data']))")
-echo "  requested : $MID"
-echo "  server has: $SERVED"
-case "$SERVED" in
-  *"$MID"*) ;;
-  *) echo "  !! server does not list the requested model: refusing to score the wrong one" >&2
-     exit 1 ;;
-esac
+# ADAPTER ATTACHMENT, BY OUTPUT. In mlx-lm 0.31.3 no model NAME attaches --adapter-path:
+# server.py:388-389 resolves "default_model" to the repo id before the _adapter_map lookup,
+# which is keyed on the literal "default_model", so it always misses. The old check here
+# (does /v1/models list "default_model"?) could never pass, and passing it would have proved
+# nothing. Every client now sends "adapters": <path>. The control: one held-out prompt,
+# answered at temperature 0 with and without the adapter, must differ. Identical answers
+# mean plain Llama would be scored as this round, so refuse.
 export FAFFABOUT_LLM="http://127.0.0.1:$PORT/v1"
 export FAFFABOUT_LLM_MODEL="$MID"
+export FAFFABOUT_LLM_ADAPTER="$ROOT/$ADAPTER"
+$PY - "$PORT" "$FAFFABOUT_LLM_ADAPTER" <<'PYEOF' || exit 1
+import json, sys, requests
+port, adapter = sys.argv[1], sys.argv[2]
+msgs = json.loads(open("data/sft/valid.jsonl").readline())["messages"][:-1]
+def ask(**extra):
+    body = {"model": "default_model", "messages": msgs, "max_tokens": 60, "temperature": 0.0, **extra}
+    r = requests.post(f"http://127.0.0.1:{port}/v1/chat/completions", json=body, timeout=600)
+    r.raise_for_status()
+    return r.json()["choices"][0]["message"]["content"].strip()
+base, adapted = ask(), ask(adapters=adapter)
+print(f"  base    : {base[:110]!r}")
+print(f"  adapted : {adapted[:110]!r}")
+if base == adapted:
+    sys.exit("  !! adapter changes nothing: refusing to score the base model as this round")
+print("  adapter attached: outputs differ")
+PYEOF
 
 # --- 1. calibration, and the GBM delta --------------------------------------------------
 echo

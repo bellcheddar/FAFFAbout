@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import re
 from pathlib import Path
@@ -98,6 +99,8 @@ def check_one(prompt: str, completion: str) -> dict:
 def llm_complete(messages, endpoint: str, model: str) -> str:
     import requests
     body = {"model": model, "messages": messages, "max_tokens": 400, "temperature": 0.0}
+    if os.environ.get("FAFFABOUT_LLM_ADAPTER"):  # the only way to attach it: see app/llm.py
+        body["adapters"] = os.environ["FAFFABOUT_LLM_ADAPTER"]
     r = requests.post(f"{endpoint}/chat/completions", json=body, timeout=180)
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"]

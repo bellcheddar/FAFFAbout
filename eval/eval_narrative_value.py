@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import re
 import sys
@@ -87,9 +88,10 @@ def stated_bottleneck(text: str) -> str | None:
 
 def complete(messages, endpoint: str, model: str, max_tokens: int = 320) -> str:
     import requests
-    r = requests.post(f"{endpoint}/chat/completions", timeout=180,
-                      json={"model": model, "messages": messages,
-                            "max_tokens": max_tokens, "temperature": 0.2})
+    body = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.2}
+    if os.environ.get("FAFFABOUT_LLM_ADAPTER"):  # the only way to attach it: see app/llm.py
+        body["adapters"] = os.environ["FAFFABOUT_LLM_ADAPTER"]
+    r = requests.post(f"{endpoint}/chat/completions", timeout=180, json=body)
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"].strip()
 

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 
@@ -116,6 +117,8 @@ def llm_predictions(rows: list[dict], endpoint: str, model: str, n: int) -> list
     out = []
     for i, r in enumerate(rows[:n]):
         body = {"model": model, "messages": r["messages"][:2], "max_tokens": 120, "temperature": 0.0}
+        if os.environ.get("FAFFABOUT_LLM_ADAPTER"):  # the only way to attach it: see app/llm.py
+            body["adapters"] = os.environ["FAFFABOUT_LLM_ADAPTER"]
         try:
             resp = requests.post(f"{endpoint}/chat/completions", json=body, timeout=120)
             resp.raise_for_status()
