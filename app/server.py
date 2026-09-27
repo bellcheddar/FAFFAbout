@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / "app"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import predict as P          # noqa: E402
+import relatives             # noqa: E402
 import resolve as R          # noqa: E402
 import retrieve as RET       # noqa: E402
 
@@ -96,16 +97,14 @@ def api_predict():
     ctx = RET.context(precs)
     out = P.forecast(res, ctx, precs, choices_from(payload))
 
-    # The narrative is the ONLY field a language model may write, and it is optional.
+    # What close relatives actually tried, read from the archive. This replaced the
+    # fine-tuned narrative on 2026-09-27: round 5's prose was safe and faithful but judged
+    # useful in 0 of 10 cases, because template-trained prose can only restate the forecast.
     try:
-        import llm
-        narrative = llm.narrate(out)
-        if narrative:
-            out["model"]["narrative"] = narrative
-            out["model"]["narrative_from"] = llm.MODEL_NAME
-    except Exception:  # noqa: BLE001
-        out["caveats"].append("No fine-tuned model is serving, so this forecast has "
-                              "numbers and precedents but no written interpretation.")
+        out["relatives"] = relatives.what_relatives_tried(con(), out["precedents"], out["bottleneck"]["gate"])
+    except Exception as e:  # noqa: BLE001
+        out["relatives"] = {"gate": out["bottleneck"]["gate"], "facts": [], "relatives": [],
+                            "error": f"{type(e).__name__}"}
 
     out["timing_ms"] = int((time.time() - t0) * 1000)
     return jsonify(out)
@@ -147,12 +146,7 @@ def healthz():
         "boosters_declared": (ROOT / "baseline" / "models" / "declared_gate_0.txt").exists(),
         "taxonomy": (ROOT / "data" / "external" / "nodes.dmp").exists(),
     }
-    try:
-        import llm
-        checks["llm"] = bool(llm.available())
-    except Exception:  # noqa: BLE001
-        checks["llm"] = False
-    ok = all(v for k, v in checks.items() if k != "llm")
+    ok = all(checks.values())
     return jsonify({"ok": ok, "checks": checks, "stats": archive_stats()}), (200 if ok else 503)
 
 

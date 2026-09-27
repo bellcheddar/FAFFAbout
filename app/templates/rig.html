@@ -141,10 +141,19 @@ button,select,input,textarea{font-family:inherit;color:inherit;}
 .drawer.n-stall h3{color:var(--ink-100);}
 .drawer h3 span{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-500);letter-spacing:.1em;margin-left:9px;}
 .drawer > p{margin:0 0 16px;font-family:'Inter',sans-serif;font-size:13.5px;line-height:1.62;color:var(--ink-300);max-width:74ch;}
-.narrative{font-family:'Inter',sans-serif;font-size:13.5px;line-height:1.66;color:var(--ink-200);
-  background:var(--steel-700);border-left:3px solid var(--lamp-amber);padding:13px 16px;border-radius:0 var(--r) var(--r) 0;margin:0 0 16px;max-width:80ch;}
-.narrative em{color:var(--ink-500);font-style:normal;font-family:'IBM Plex Mono',monospace;font-size:10px;
-  letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:6px;}
+.tried{background:var(--steel-700);border-left:3px solid var(--lamp-amber);padding:13px 16px;
+  border-radius:0 var(--r) var(--r) 0;margin:0 0 16px;max-width:86ch;display:grid;gap:12px;}
+.tried em{color:var(--ink-500);font-style:normal;font-family:'IBM Plex Mono',monospace;font-size:10px;
+  letter-spacing:.12em;text-transform:uppercase;}
+.tried ul{margin:0;padding-left:18px;font-family:'Inter',sans-serif;font-size:13.5px;line-height:1.6;color:var(--ink-100);display:grid;gap:4px;}
+.tried .none{margin:0;font-family:'Inter',sans-serif;font-size:13px;color:var(--ink-300);}
+.rel{display:grid;gap:3px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink-200);
+  padding-top:9px;border-top:1px solid var(--steel-500);}
+.rel.censored{color:var(--ink-400);}
+.rel .who{color:var(--ink-100);}
+.rel.censored .who{color:var(--ink-400);text-decoration:line-through dashed;}
+.rel .trial{padding-left:14px;color:var(--ink-300);}
+.rel .stop{color:var(--lamp-red);}
 .flagbar{display:flex;gap:9px;align-items:flex-start;background:var(--lamp-grey-dim);border:1px dashed #3d3d4d;
   border-radius:var(--r);padding:10px 13px;margin-bottom:16px;font-family:'Inter',sans-serif;font-size:12.5px;color:#9d9db4;line-height:1.55;max-width:82ch;}
 .flagbar b{color:#c3c3da;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.13em;text-transform:uppercase;flex:0 0 auto;padding-top:2px;}
@@ -483,10 +492,28 @@ function render(){
       'In the archive the mere presence of a protocol correlates with progression, so the headline model ' +
       'excludes host and tag, and the model that uses them is trained only on records that declare one.</p>';
 
-  const narrative = d.model.narrative
-    ? '<div class="narrative"><em>interpretation · ' + esc(d.model.narrative_from || 'model') + '</em>' +
-      esc(d.model.narrative).replace(/\n/g,'<br>') + '</div>'
-    : '';
+  /* What close relatives actually tried: read from the archive's trial records, never generated.
+     It replaced the fine-tuned narrative on 2026-09-27 (useful in 0 of 10 expert-graded cases). */
+  const R = d.relatives || {facts: [], relatives: []};
+  const trialLine = t => {
+    const bits = [t.construct, t.expression_pct != null ? 'expression ' + t.expression_pct + '%' : '',
+                  t.solubility_pct != null ? 'solubility ' + t.solubility_pct + '%' : '',
+                  t.final_mg_ml != null ? t.final_mg_ml + ' mg/mL' : ''].filter(Boolean).join(' · ');
+    return '<div class="trial">reached ' + esc(t.reached || 'unknown') + (bits ? ' · ' + esc(bits) : '') +
+      (t.stopped ? ' · <span class="stop">' + esc(t.stopped) + '</span>' : '') + '</div>';
+  };
+  const relRows = R.relatives.map(r =>
+    '<div class="rel' + (r.censored ? ' censored' : '') + '"><span class="who">' + esc(r.target_id) + '</span>' +
+      '<span>' + pct(r.identity) + '% identical · ' + esc(r.centre) +
+      (r.host || r.tag ? ' · ' + esc([r.host, r.tag && r.tag + ' tag'].filter(Boolean).join(', ')) : '') +
+      ' · furthest ' + esc(r.max_stage != null ? ladder[r.max_stage] : 'unknown') +
+      (r.censored ? ' · censored, not evidence' : '') +
+      (r.n_trials > r.trials.length ? ' · ' + r.n_trials + ' trials, ' + r.trials.length + ' shown' : '') + '</span>' +
+      r.trials.map(trialLine).join('') + '</div>').join('');
+  const tried = '<div class="tried"><em>What close relatives tried · from the archive\'s trial records</em>' +
+    (R.facts.length ? '<ul>' + R.facts.map(f => '<li>' + esc(f) + '</li>').join('') + '</ul>'
+                    : '<p class="none">No close relative with a trial record, so the forecast rests on this protein\'s own features.</p>') +
+    relRows + '</div>';
 
   $('drawer').className = 'drawer' + (isStall ? '' : ' n-stall');
   $('drawer').innerHTML =
@@ -495,7 +522,6 @@ function render(){
                     ? 'reached from ' + esc(ladder[state.selected-1]) + ' with p ' + arrive.toFixed(2)
                     : 'every record starts here') +
       ' · cumulative ' + surv[state.selected].toFixed(2) + '</span></h3>' +
-    narrative +
     '<div class="flagbar"><b>Censoring</b><span>' +
       (censored.length
         ? censored.length + ' of ' + d.precedents.length + ' retrieved precedents closed when their centre wound ' +
@@ -503,6 +529,7 @@ function render(){
         : 'No censored precedent among those retrieved. Across the whole archive ' +
           {{ stats.censored_pct }} + '% of targets are censored.') +
       '</span></div>' +
+    tried +
     '<p class="sub">Archive precedents · MMseqs2, 30% identity, 80% coverage</p>' +
     '<table class="tbl"><thead><tr><th>Target</th><th>Centre</th><th>Source</th><th>Id</th><th>Furthest</th><th>Outcome</th></tr></thead><tbody>' +
       (rows || '<tr><td colspan="6">No precedent above 30% identity.</td></tr>') + '</tbody></table>' +
