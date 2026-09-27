@@ -20,6 +20,10 @@ LADDER = ["selected", "cloned", "expressed", "soluble", "purified",
 
 MAX_RELATIVES = 6          # the closest relatives shown in detail
 MAX_TRIALS = 3             # trials listed per relative
+# The archive's protocol mining leaves lower-case codes; show what a scientist would write.
+HOST_LABEL = {"ecoli": "E. coli", "insect": "insect cells", "cell_free": "cell-free",
+              "mammalian": "mammalian cells", "yeast": "yeast"}
+TAG_LABEL = {"his": "His", "gst": "GST", "mbp": "MBP", "sumo": "SUMO", "strep": "Strep"}
 ADMIN_STOPS = {"other", "duplicate target found", "pdb duplicate found", "structure successful"}
 
 _START = re.compile(r"Sequence start:\s*(\d+)")
@@ -166,7 +170,8 @@ def what_relatives_tried(con, precedents: list[dict], gate: int) -> dict:
         rel.append({"target_id": p["target_id"], "centre": p.get("centre", ""),
                     "organism": p.get("organism", ""), "identity": p.get("identity"),
                     "max_stage": p.get("max_stage"), "censored": bool(p.get("censored")),
-                    "host": p.get("host") or "", "tag": p.get("tag") or "",
+                    "host": HOST_LABEL.get(p.get("host") or "", p.get("host") or ""),
+                    "tag": TAG_LABEL.get(p.get("tag") or "", p.get("tag") or ""),
                     "n_trials": len(ts), "trials": ts})
     # facts from every relative and every trial; only the display is trimmed
     found = facts(rel, gate) if rel else []

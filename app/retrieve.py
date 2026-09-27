@@ -122,7 +122,14 @@ def precedents(sequence: str, con: duckdb.DuckDBPyConnection | None = None,
         own.executemany("INSERT INTO _hits VALUES (?, ?, ?)",
                         [(k, v["identity"], max(v["qcov"], v["tcov"])) for k, v in keep.items()])
         rows = own.execute("""
-            SELECT t.target_id, t.centre, t.organism, h.identity, h.coverage,
+            -- 592 archive targets carry a bare NCBI taxon id as their organism name; show
+            -- the genus and the id rather than a number that reads like a data error
+            SELECT t.target_id, t.centre,
+                   CASE WHEN regexp_matches(trim(t.organism), '^[0-9]+$')
+                        THEN coalesce(nullif(tb.genus, '') || ' (NCBI taxon ' || trim(t.organism) || ')',
+                                      'NCBI taxon ' || trim(t.organism))
+                        ELSE t.organism END AS organism,
+                   h.identity, h.coverage,
                    c.max_stage, coalesce(c.censored, false) AS censored,
                    coalesce(c.censored_reason, '') AS censored_reason,
                    coalesce(c.method, '') AS method,
@@ -133,6 +140,7 @@ def precedents(sequence: str, con: duckdb.DuckDBPyConnection | None = None,
             JOIN targets t USING (seq_md5)
             LEFT JOIN censoring c USING (target_id)
             LEFT JOIN features f USING (target_id)
+            LEFT JOIN taxonomy_by_id tb ON tb.taxid = TRY_CAST(trim(t.organism) AS BIGINT)
             LEFT JOIN (SELECT target_id, count(DISTINCT pdb_id) n_pdb,
                               min(NULLIF(deposit_date, '')) first_deposit
                        FROM outcomes GROUP BY 1) o USING (target_id)
