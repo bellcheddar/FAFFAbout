@@ -2,7 +2,7 @@
 
 > **Fine-tuned Attrition Forecasting From Archives: know where your protein is likely to die before you order the gene.**
 
-![python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white) ![duckdb](https://img.shields.io/badge/duckdb-1.5-FFF000?logo=duckdb&logoColor=black) ![lightgbm](https://img.shields.io/badge/LightGBM-4.7-00897B) ![mlx-lm](https://img.shields.io/badge/mlx--lm-0.31-000000?logo=apple&logoColor=white) ![mmseqs2](https://img.shields.io/badge/MMseqs2-18-00897B) ![flask](https://img.shields.io/badge/flask-3.1-000000?logo=flask&logoColor=white) ![targets](https://img.shields.io/badge/targets-335%2C771-467FF7) ![censored](https://img.shields.io/badge/censored-19.03%25-9b51e0) ![tests](https://img.shields.io/badge/pytest-194%20passing-00897B) ![data](https://img.shields.io/badge/data-PSI%20TargetTrack%20%C2%B7%20CC--BY--SA--4.0-9b51e0) ![status](https://img.shields.io/badge/status-round%205%20training-fcb900) ![author](https://img.shields.io/badge/author-Marc%20C.%20Deller%2C%20D.Phil.-1C244B)
+![python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white) ![duckdb](https://img.shields.io/badge/duckdb-1.5-FFF000?logo=duckdb&logoColor=black) ![lightgbm](https://img.shields.io/badge/LightGBM-4.7-00897B) ![mlx-lm](https://img.shields.io/badge/mlx--lm-0.31-000000?logo=apple&logoColor=white) ![mmseqs2](https://img.shields.io/badge/MMseqs2-18-00897B) ![flask](https://img.shields.io/badge/flask-3.1-000000?logo=flask&logoColor=white) ![targets](https://img.shields.io/badge/targets-335%2C771-467FF7) ![censored](https://img.shields.io/badge/censored-19.03%25-9b51e0) ![tests](https://img.shields.io/badge/pytest-194%20passing-00897B) ![data](https://img.shields.io/badge/data-PSI%20TargetTrack%20%C2%B7%20CC--BY--SA--4.0-9b51e0) ![status](https://img.shields.io/badge/status-round%205%20evaluated-00897B) ![author](https://img.shields.io/badge/author-Marc%20C.%20Deller%2C%20D.Phil.-1C244B)
 
 <table>
 <tr>
@@ -103,7 +103,17 @@ The pattern is the one a crystallographer would predict: crystallisation is the 
 | The GBM, lowest single-step probability | 18.5% |
 | **The GBM, largest loss of survival (what the app shows)** | **34.6%** |
 
-**The language model.** Round 04 invented no identifiers in 40 test cases and flagged censored precedents 19 times out of 20. But it had learned to recite its training wording (held-out loss 0.011 on answers seen word for word in training, against 0.055 on novel ones), and it cited a precedent in only 8 of 40 cases. **Round 5**, training now, changes the training data so the model explains the GBM's forecast rather than inventing its own: precedent citation in the training answers rises from 2% to 99%, and word-for-word overlap between test and training answers falls from 49% to 9%. The criteria it has to meet were written down before training started (see `PROJECT_PLAN.md`).
+**The language model.** Round 04 invented no identifiers, but it had learned to recite its training wording, named a bottleneck of its own that was right only 27% of the time, and cited a precedent in just 8 of 40 cases. Round 5 was retrained to explain the GBM's forecast instead of inventing one, and it met all five criteria written down before training started:
+
+| Criterion | Round 04 | Round 5 |
+|---|---|---|
+| Invents a target or PDB identifier | 0 of 40 | **0 of 40** |
+| Names the same bottleneck as the GBM | no (27.2% vs 34.6% right) | **yes, on all 235 test proteins** |
+| Cites a precedent from the archive | 8 of 40 | **36 of 40** |
+| Flags censored precedents when present | 19 of 20 | **29 of 30** |
+| Echoes training wording (lower is better; corpus 0.626) | recited | **0.608** |
+
+Whether its explanations add insight a scientist would act on is the question the 40-case expert rubric answers, and that grading is still to do.
 
 ## 🖥️ The application
 
@@ -174,7 +184,7 @@ Prefix each Python step with `.venv/bin/python`. Tests: `.venv/bin/python -m pyt
 - [x] **GBM:** mean AUROC 0.839 on held-out families; ships in the app as the source of every number
 - [x] **Application:** built and working locally
 - [x] **Language model, round 04:** trained and evaluated; safe on identifiers, but recites its training wording
-- [ ] **Language model, round 5:** training on the rebuilt corpus; evaluation runs automatically when it finishes
+- [x] **Language model, round 5:** explains the GBM's forecast; meets all five pre-stated criteria
 - [ ] **Expert grading** of the 40-case rubric
 - [ ] **ESM-2 features** to replace the local disorder predictor
 - [ ] **Deploy** to faffabout.mdeller.com
