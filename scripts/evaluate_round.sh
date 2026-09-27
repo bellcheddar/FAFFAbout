@@ -125,20 +125,28 @@ PYEOF
 
 # --- 1. calibration, and the GBM delta --------------------------------------------------
 echo
-echo "--- 1/3 calibration (Brier, ECE, AUROC, bottleneck top-1, GBM delta) ---"
+echo "--- 1/4 calibration (Brier, ECE, AUROC, bottleneck top-1, GBM delta) ---"
 $PY eval/eval_calibration.py --llm-endpoint "$FAFFABOUT_LLM" --llm-model "$MID" --n 300 2>&1 | tail -30
 
 # --- 2. hallucinated identifiers: the automatic fail ------------------------------------
 echo
-echo "--- 2/3 generative (hallucinated identifiers are an AUTOMATIC FAIL) ---"
+echo "--- 2/4 generative (hallucinated identifiers are an AUTOMATIC FAIL) ---"
 $PY eval/eval_generative.py --llm-endpoint "$FAFFABOUT_LLM" --llm-model "$MID" --n "$N" 2>&1 | tail -20
 GEN_RC=${PIPESTATUS[0]}
 
 # --- 3. is the prose worth anything? ----------------------------------------------------
 echo
-echo "--- 3/3 narrative value, against the corpus floor ---"
-$PY eval/eval_narrative_value.py --llm-endpoint "$FAFFABOUT_LLM" --llm-model "$MID" --n 24 \
+echo "--- 3/4 narrative value, against the corpus floor ---"
+# n=100, matching the corpus floor: at n=24 the corpus's own echo moved 0.015 between two
+# samplings, the same size as the gaps this was being asked to resolve.
+$PY eval/eval_narrative_value.py --llm-endpoint "$FAFFABOUT_LLM" --llm-model "$MID" --n 100 \
     --label "$(basename "$ADAPTER")" 2>&1 | tail -24
+
+# --- 4. bottleneck against where targets ACTUALLY stopped ------------------------------
+echo
+echo "--- 4/4 bottleneck top-1 against the archive (majority, template, GBM, this model) ---"
+$PY eval/eval_bottleneck.py --llm-endpoint "$FAFFABOUT_LLM" --llm-model "$MID" \
+    --label "$(basename "$ADAPTER")" 2>&1 | grep -v 'llm [0-9]*/' | tail -14
 
 # --- summary ----------------------------------------------------------------------------
 echo

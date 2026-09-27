@@ -43,7 +43,7 @@ import gbm_baseline as gb  # noqa: E402
 SFT = ROOT / "data" / "sft"
 OUT = ROOT / "eval"
 LADDER = gb.LADDER
-BOTTLENECK = re.compile(r"Predicted bottleneck:\s*([a-z]+)\s*->")
+BOTTLENECK = re.compile(r"(?:Predicted bottleneck|Weakest point):\s*([a-z]+)\s*->")
 PREFIX = "temporal_"
 
 

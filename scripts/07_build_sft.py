@@ -3,11 +3,16 @@
 
 Five task types in the specification's mix, chat JSONL, one {"messages": [...]} per line.
 
-  gate_judgement       45%   will this target clear gate g, with a one-sentence reason
-  pipeline_forecast    20%   the whole eight-gate vector plus the predicted bottleneck
+  gate_judgement       45%   a verdict in words on gate g, given the GBM's estimate for it
+  pipeline_forecast    20%   narrate the GBM's forecast: its weakest point, and why
   orthologue_ranking   15%   rank the given precedents by likely success, with reasoning
-  construct_recommend  12%   boundaries, host and tag, justified from precedent
-  failure_attribution   8%   which features drove the pessimism
+  construct_recommend  12%   boundaries, host and tag, aimed at the GBM's weakest step
+  failure_attribution   8%   explain a stop that the prompt states
+
+From round 5 (2026-09-27) the model narrates and never forecasts: every prompt that needs
+numbers carries the GBM's, out-of-fold for training targets (scripts/06b_gbm_forecasts.py),
+and no completion contains a probability. Reasons are specific to the gate in question
+(gate_cues) and every completion with a precedent table cites one of its rows.
 
 Three rules from spec section 5.3 are enforced here rather than described:
 
@@ -263,25 +268,31 @@ def calibrated_p(r: dict, priors: dict[int, float]) -> float:
     return min(0.97, max(0.03, p))
 
 
+VERDICTS = [  # (lower bound on the GBM's conditional, phrasings)
+    (0.75, ["Likely to clear.", "This step should go through.", "Good prospects at this step."]),
+    (0.50, ["More likely than not to clear, but not comfortably.", "Probably clears, with some risk.",
+            "Leaning towards success here."]),
+    (0.30, ["A real risk of stalling here.", "Doubtful.", "This step could well be the wall."]),
+    (0.00, ["Unlikely to clear.", "This is where it is most likely to stop.", "Poor prospects at this step."]),
+]
+
+
 def gate_judgement(r: dict, rng: random.Random, priors: dict[int, float]) -> dict | None:
+    """Round 5: the prompt carries the GBM's estimate for this gate and the answer is a
+    verdict in words plus reasons, never a probability of its own."""
     g = r["gate"]
-    base = r.get("cluster_base_rate")
+    cond = r.get("gbm")
+    if not cond or cond[g] is None or cond[g] != cond[g]:
+        return None
+    p = cond[g]
     q = rng.choice(PARAPHRASES["gate_judgement"]).format(action=GATE_DESC[g])
     user = (f"{q}\n\nTarget features:\n{fmt_features(r)}\n\n"
             f"Gate under consideration: {LADDER[g]} -> {LADDER[g+1]} ({GATE_DESC[g]})\n\n"
             f"Archive evidence:\n{fmt_evidence(r)}"
-            # Same structural absence as cluster_censored_frac: cluster_base_rate is a ratio
-            # over TRAINING-split cluster members, and held-out clusters have none, so it is
-            # NULL for 100% of valid and test rows. Omit the clause instead of printing
-            # "historical clearance of this gate in this cluster: nan%", which appeared in
-            # 900 prompts. present() rejects NaN, which is truthy and is-not-None.
-            + (f"\n  historical clearance of this gate in this cluster: {base:.0%}"
-               if present(base) else "")
-            + (f"\n\nPrecedents:\n{fmt_precedents(r['precedents'])}" if r.get("precedents") else ""))
-    p = calibrated_p(r, priors)
-    reason = build_reason(r, p >= 0.5)
-    assistant = (f"Probability of getting from {LADDER[g]} to {LADDER[g+1]}: {p:.2f}\n"
-                 f"{reason}{censoring_caveat(r)}")
+            + (f"\n\nPrecedents:\n{fmt_precedents(r['precedents'])}" if r.get("precedents") else "")
+            + f"\n\nModel estimate for this gate (gradient-boosted model; fixed): {p:.2f}")
+    verdict = rng.choice(next(v for lo, v in VERDICTS if p >= lo))
+    assistant = f"{verdict} {narrative(r, g, rng)}"
     return {"task": "gate_judgement", "target_id": r["target_id"], "gate": g,
             "label": r.get("label"), "p": round(p, 4), "messages": [
         {"role": "system", "content": SYSTEM},
@@ -379,36 +390,172 @@ def build_reason(r: dict, cleared: bool) -> str:
     return f"{head}{tail}."
 
 
-def pipeline_forecast(r: dict, rng: random.Random, priors: dict[int, float]) -> dict:
-    rates = r.get("gate_rates") or {}
-    n_clu = r.get("n_cluster_precedents") or 0
+# --- round 5: the model narrates the GBM's forecast ------------------------------------
+#
+# Round 04 was trained to INVENT the gate vector and name the lowest-conditional gate. That
+# broke CLAUDE.md rule 5 (every number comes from the GBM), the app discarded the numbers
+# anyway (app/llm.py strip_generated_numbers), and the rule it learned named the true wall
+# 24.0% of the time against 22.8% for always guessing the commonest wall. The GBM under the
+# app's own largest-drop rule gets 34.6% (eval/eval_bottleneck.py). So from round 5 the
+# prompt carries the GBM's forecast (out-of-fold for training targets, from
+# scripts/06b_gbm_forecasts.py), the weakest point is the app's largest-drop gate, and the
+# completion is prose: why THIS target is weak at THAT gate, which precedent says so, and
+# how far to trust it. No probabilities: the GBM's are shown beside the prose.
+
+def forecast_drop_gate(cond: list[float]) -> int:
+    """app/predict.py's bottleneck(): the gate that loses the most survival mass."""
+    surv, run = [1.0], 1.0
+    for c in cond:
+        run *= c
+        surv.append(run)
+    return max(range(8), key=lambda i: surv[i] - surv[i + 1])
+
+
+def fmt_forecast(cond: list[float]) -> str:
+    """The GBM block, in the exact shape app/llm.py builds from the /predict payload."""
+    lines, run = [], 1.0
+    for g, c in enumerate(cond):
+        run *= c
+        lines.append(f"  {LADDER[g]} -> {LADDER[g+1]}: {c:.2f} conditional, {run:.2f} cumulative")
+    g = forecast_drop_gate(cond)
+    return ("Model forecast (gradient-boosted model; these numbers are fixed):\n" + "\n".join(lines)
+            + f"\n  weakest point: {LADDER[g]} -> {LADDER[g+1]} (largest loss of survival)")
+
+
+def gate_cues(r: dict, g: int) -> list[str]:
+    """Features that bear on THIS gate, in this target, worded for that gate.
+
+    build_reason lists the same cues whatever the gate, so a disordered C-terminus was
+    offered as the reason cloning would fail. A cue belongs to the gates where the
+    structural-biology mechanism actually acts.
+    """
+    tm, dis = r.get("tm_helices") or 0, r.get("disorder_frac") or 0
+    dn, dc = r.get("disorder_nterm") or 0, r.get("disorder_cterm") or 0
+    n, cys = r.get("seq_len") or 0, r.get("cys_count") or 0
+    lc, gravy = r.get("low_complexity_frac") or 0, r.get("gravy")
+    euk = r.get("superkingdom") == "Eukaryota"
+    cues: list[str] = []
+    if g == 0:
+        if n > 1000: cues.append(f"a {n}-residue open reading frame is a long gene to clone intact")
+        if lc > 0.2: cues.append("low-complexity, repetitive sequence tends to be awkward to amplify and assemble")
+    if g == 1:
+        if euk: cues.append("a eukaryotic protein often expresses poorly in the bacterial hosts this archive relied on")
+        if tm >= 3: cues.append(f"{tm} predicted transmembrane helices put a heavy load on the host's membrane insertion machinery")
+        elif tm >= 1: cues.append("a predicted membrane anchor can make expression toxic or low")
+        if r.get("signal_peptide"): cues.append("a predicted signal peptide targets the protein away from the cytoplasm")
+        if n > 800: cues.append(f"at {n} residues it is large for routine bacterial expression")
+    if g == 2:
+        if tm >= 1: cues.append("membrane segments usually leave the protein in the insoluble fraction without detergent")
+        if cys > 8: cues.append(f"{cys} cysteines raise the risk of misfolding and aggregation in a reducing cytoplasm")
+        if present(gravy) and gravy > 0: cues.append("an overall hydrophobic composition favours aggregation")
+        if dis > 0.4: cues.append("extensive predicted disorder makes a stable, soluble fold less likely")
+    if g == 3:
+        if dis > 0.4: cues.append("extensive predicted disorder invites proteolysis and heterogeneity during purification")
+        if n > 600: cues.append("a long chain is harder to purify intact")
+        if tm >= 1: cues.append("any membrane segment drags detergent into every purification step")
+    if g == 4:
+        if dis > 0.3: cues.append("a large disordered fraction is the classic obstacle to crystal packing")
+        if dn > 0.5: cues.append("a disordered N-terminus would be worth trimming before crystallisation trials")
+        if dc > 0.5: cues.append("a disordered C-terminus would be worth trimming before crystallisation trials")
+        if lc > 0.15: cues.append("low-complexity segments add conformational heterogeneity")
+        if tm >= 3: cues.append("polytopic membrane proteins rarely crystallise without extensive screening")
+    if g == 5:
+        if dis > 0.3: cues.append("residual flexibility tends to limit diffraction even when crystals form")
+        if n > 600: cues.append("large, multi-domain proteins often give crystals that diffract poorly")
+    if g >= 6 and not cues:
+        cues.append("late-stage losses in this archive mostly reflect phasing and refinement effort rather than the sequence")
+    return cues
+
+
+LEADS = {
+    "weak": ["The forecast puts the main risk at {act}.",
+             "The weakest point in this forecast is {act}.",
+             "Most of the attrition in this forecast falls at {act}.",
+             "If this target stalls, the forecast says it will most likely be at {act}."],
+    "because": ["For this protein, {cues}.", "Here, {cues}.", "In this target's case, {cues}.",
+                "Looking at the features, {cues}."],
+    "nocue": ["Nothing in the sequence features points to that step in particular, so the forecast is carried by the archive's record for comparable targets.",
+              "The target's own properties are unremarkable for that step; the forecast rests on how comparable targets fared.",
+              "No single feature of this protein explains that step, so the risk comes from the archive's record rather than the sequence."],
+    # failure_attribution explains a stop that already happened: there is no forecast to cite
+    "stopped": ["The stop came at {act}.", "It failed at {act}.", "The attempt ended at {act}.",
+                "What went wrong was {act}."],
+    "nocue_explain": ["Nothing in its sequence features explains that stop, so it most likely reflects how hard this family is in general.",
+                      "Its own properties are unremarkable for that step, which points to the family rather than this sequence.",
+                      "No single feature of this protein accounts for it; the difficulty looks like the family's."],
+}
+
+
+def precedent_sentence(r: dict, g: int, rng: random.Random) -> str:
+    """Cite a precedent FROM THE PROMPT that bears on this gate, or say there is none.
+
+    Round 04 cited a precedent in 8 of 40 evaluated cases, because only the orthologue task
+    ever named one. Every identifier here comes from r['precedents'], which is exactly the
+    table printed in the prompt, so the habit taught is citing what was given.
+    """
+    shown = (r.get("precedents") or [])[:8]
+    if not shown:
+        return rng.choice(["There is no precedent within 30% identity, so this rests on the protein's own properties.",
+                           "No relative within 30% identity is in the archive, which leaves the target's own features to carry the forecast."])
+    live = [p for p in shown if not p.get("censored") and p.get("max_stage") is not None]
+    if not live:
+        return (f"The {len(shown)} precedents shown are all censored at centre closure, so they say "
+                "nothing about this step either way.")
+    same = [p for p in live if p["max_stage"] == g]
+    past = [p for p in live if p["max_stage"] > g]
+    if same:
+        p = rng.choice(same)
+        return rng.choice([f"{p['target_id']} stopped at exactly this point, at {LADDER[g]}.",
+                           f"The precedent agrees: {p['target_id']} got no further than {LADDER[g]}."])
+    if past:
+        p = max(past, key=lambda q: q["max_stage"])
+        return rng.choice([f"{p['target_id']} got past this point and reached {LADDER[p['max_stage']]}, so it is not a hard wall for this family.",
+                           f"It is not insurmountable: {p['target_id']} reached {LADDER[p['max_stage']]}."])
+    p = max(live, key=lambda q: q["max_stage"])
+    return (f"None of the uncensored precedents reached {LADDER[g]}; the furthest, {p['target_id']}, "
+            f"stopped at {LADDER[p['max_stage']]}.")
+
+
+def hedge(r: dict, rng: random.Random) -> str:
+    n = r.get("n_precedents") or 0
+    close = r.get("n_close_precedents") or 0
+    if n >= 20 and close >= 3:
+        return rng.choice([" The evidence here is strong enough to take seriously.",
+                           " With this much close precedent, the forecast is well grounded."])
+    if n >= 5:
+        return rng.choice([" Treat this as a reasonable guide rather than a firm prediction.",
+                           " The evidence is moderate, so hold the conclusion loosely."])
+    return rng.choice([" The evidence is thin, so this is a weak prior rather than a prediction.",
+                       " With so little precedent, do not lean on this heavily."])
+
+
+def narrative(r: dict, g: int, rng: random.Random, explain: bool = False) -> str:
+    """Prose about gate g for this target: cues, a cited precedent, a hedge, the censoring note.
+
+    `explain` is for failure_attribution, which accounts for a stop that happened rather
+    than a forecast, so its fallback must not claim a forecast exists.
+    """
+    cues = gate_cues(r, g)
+    why = (rng.choice(LEADS["because"]).format(cues=oxford(cues[:2])) if cues
+           else rng.choice(LEADS["nocue_explain" if explain else "nocue"]))
+    return f"{why} {precedent_sentence(r, g, rng)}{hedge(r, rng)}{censoring_caveat(r)}"
+
+
+def pipeline_forecast(r: dict, rng: random.Random, priors: dict[int, float]) -> dict | None:
+    cond = r.get("gbm")
+    if not cond or any(c is None or c != c for c in cond):
+        return None
     q = rng.choice(PARAPHRASES["pipeline_forecast"])
     user = (f"{q}\n\nTarget features:\n{fmt_features(r)}\n\n"
             f"Archive evidence:\n{fmt_evidence(r)}"
-            + (f"\n\nPrecedents:\n{fmt_precedents(r['precedents'])}" if r.get("precedents") else ""))
-    lines, surv = [], 1.0
-    bottleneck, worst = 0, 1.1
-    for g in range(8):
-        # NEVER `0.85 if g < reached else 0.35`. That filled 37.1% of all gate cells from
-        # this target's OWN max_stage, so 64.7% of forecasts carried the answer in the
-        # numbers, typographically identical to the cells that came from real evidence.
-        # It also contradicted calibrated_p's docstring a hundred lines above, which warns
-        # that fixed values for success and failure teach confident guessing.
-        # A missing cluster rate means "no evidence", and the honest stand-in for no
-        # evidence is the archive-wide rate for that gate, shrunk as calibrated_p shrinks.
-        prior = priors.get(g, 0.5)
-        obs = rates.get(g)
-        cond = prior if obs is None else (obs * n_clu + SHRINKAGE * prior) / (n_clu + SHRINKAGE)
-        cond = min(0.97, max(0.05, cond))
-        surv *= cond
-        lines.append(f"  {LADDER[g]} -> {LADDER[g+1]}: {cond:.2f} conditional, {surv:.2f} cumulative")
-        if cond < worst:
-            worst, bottleneck = cond, g
-    assistant = ("Gate-by-gate outlook:\n" + "\n".join(lines) +
-                 f"\n\nPredicted bottleneck: {LADDER[bottleneck]} -> {LADDER[bottleneck+1]}"
-                 f" ({GATE_DESC[bottleneck]}).\n{build_reason(r, evidence_is_positive(r))}"
-                 f"{censoring_caveat(r)}")
-    return {"task": "pipeline_forecast", "target_id": r.get("target_id"), "messages": [
+            + (f"\n\nPrecedents:\n{fmt_precedents(r['precedents'])}" if r.get("precedents") else "")
+            + f"\n\n{fmt_forecast(cond)}")
+    g = forecast_drop_gate(cond)
+    act = f"{LADDER[g]} -> {LADDER[g+1]} ({GATE_DESC[g]})"
+    assistant = (f"Weakest point: {act}.\n"
+                 + rng.choice(LEADS["weak"]).format(act=GATE_DESC[g]) + " "
+                 + narrative(r, g, rng))
+    return {"task": "pipeline_forecast", "target_id": r.get("target_id"), "gate": g, "messages": [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": user},
         {"role": "assistant", "content": assistant}]}
@@ -469,7 +616,8 @@ def construct_recommend(r: dict, rng: random.Random) -> dict | None:
     if not (present(r.get("host")) or present(r.get("tag"))):
         return None
     q = rng.choice(PARAPHRASES["construct_recommend"])
-    user = (f"{q}\n\nTarget features:\n{fmt_features(r)}\n\nArchive evidence:\n{fmt_evidence(r)}")
+    user = (f"{q}\n\nTarget features:\n{fmt_features(r)}\n\nArchive evidence:\n{fmt_evidence(r)}"
+            + (f"\n\nPrecedents:\n{fmt_precedents(r['precedents'])}" if r.get("precedents") else ""))
     parts = []
     dn, dc = r.get("disorder_nterm") or 0, r.get("disorder_cterm") or 0
     if dn > 0.5 or dc > 0.5:
@@ -497,8 +645,14 @@ def construct_recommend(r: dict, rng: random.Random) -> dict | None:
         parts.append("This is predicted polytopic, so expect detergent screening to dominate the effort.")
     # was build_reason(r, max_stage >= 4): the prose tone was set by whether THIS target got
     # through, which is the answer, and at inference there is no answer to read.
-    assistant = ("\n".join(parts) + "\n" + build_reason(r, evidence_is_positive(r))
-                 + censoring_caveat(r))
+    cond = r.get("gbm")
+    if cond and all(c == c for c in cond):
+        # round 5: aim the construct at the step the GBM says is weakest, and cite precedent
+        g = forecast_drop_gate(cond)
+        tail = f"The step to design for is {GATE_DESC[g]}. {narrative(r, g, rng)}"
+    else:
+        tail = build_reason(r, evidence_is_positive(r)) + censoring_caveat(r)
+    assistant = "\n".join(parts) + "\n" + tail
     return {"task": "construct_recommend", "target_id": r.get("target_id"), "messages": [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": user},
@@ -506,18 +660,26 @@ def construct_recommend(r: dict, rng: random.Random) -> dict | None:
 
 
 def failure_attribution(r: dict, rng: random.Random) -> dict | None:
-    if (r.get("max_stage") or 0) > 3:
+    """Explain a stop that is GIVEN in the prompt (Marc's call, 2026-09-27).
+
+    Round 04's completion announced "In this archive it stopped at X" although the prompt
+    never said so, which taught the model to state an outcome it was not given. The stage
+    is now in the prompt and the answer explains it.
+
+    Censored targets are excluded. Their earlier gates are legitimately in the loss as
+    'cleared', so they reach this function, and describing a file closed at centre
+    shutdown as a scientific failure breaks rule 2 (censored is never a negative).
+    """
+    g = r.get("max_stage")
+    if g is None or g > 3 or r.get("target_censored"):
         return None
     q = rng.choice(PARAPHRASES["failure_attribution"])
-    user = (f"{q}\n\nTarget features:\n{fmt_features(r)}\n\nArchive evidence:\n{fmt_evidence(r)}")
-    assistant = (build_reason(r, False) + " In this archive it stopped at "
-                 f"{LADDER[r['max_stage']]}, which is consistent with that reading."
-                 + censoring_caveat(r))
-    # build_reason(r, False) is NOT leakage to remove: this task is gated on max_stage <= 3
-    # and exists to explain a failure that has already happened, so a negative frame is the
-    # task rather than a peek at the answer. The line below that states the observed stage
-    # is a genuine open question though, since the prompt never supplies it and a model
-    # asked this at inference would have to invent one. Flagged for Marc, not changed here.
+    user = (f"{q}\n\nIn the archive this target stopped at {LADDER[g]}: it did not get through "
+            f"{GATE_DESC[g]}.\n\nTarget features:\n{fmt_features(r)}\n\n"
+            f"Archive evidence:\n{fmt_evidence(r)}"
+            + (f"\n\nPrecedents:\n{fmt_precedents(r['precedents'])}" if r.get("precedents") else ""))
+    assistant = (rng.choice(LEADS["stopped"]).format(act=GATE_DESC[g]) + " "
+                 + narrative(r, g, rng, explain=True))
     return {"task": "failure_attribution", "target_id": r.get("target_id"), "messages": [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": user},
@@ -559,7 +721,7 @@ def main() -> None:
     print("loading L1 with features and context ...")
     df = con.execute("""
         SELECT l.target_id, l.centre, l.gate, l.label, l.in_loss, l.max_stage,
-               s.split_cluster, s.split_temporal, f.organism, f.superkingdom, f.seq_len, f.pi, f.gravy,
+               s.split_cluster, s.split_temporal, s.censored AS target_censored, f.organism, f.superkingdom, f.seq_len, f.pi, f.gravy,
                f.net_charge_ph7, f.cys_count, f.tm_helices, f.signal_peptide,
                f.disorder_frac, f.disorder_nterm, f.disorder_cterm, f.low_complexity_frac,
                f.protein_types, f.target_construct_type, f.host, f.tag, f.protease,
@@ -639,6 +801,22 @@ def main() -> None:
         if rate is not None:
             gate_rates.setdefault(tid, {})[gate] = rate
 
+    # --- the GBM's forecast, which every round 5 prompt carries ---------------------------
+    # Out-of-fold for training targets (scripts/06b_gbm_forecasts.py), so a prompt never
+    # shows the optimistic numbers of a booster scoring a target it trained on.
+    fc_path = PQ / "gbm_forecast.parquet"
+    if not fc_path.exists():
+        raise SystemExit(f"{fc_path} is missing: run scripts/06b_gbm_forecasts.py first")
+    print("GBM forecasts ...")
+    gbm_cluster: dict[str, list] = {}
+    gbm_temporal: dict[str, list] = {}
+    for tid, gate, pc, pt in con.execute(
+            f"SELECT target_id, gate, p_cluster, p_temporal FROM read_parquet('{fc_path}')").fetchall():
+        gbm_cluster.setdefault(tid, [None] * 8)[gate] = pc
+        if pt is not None and pt == pt:
+            gbm_temporal.setdefault(tid, [None] * 8)[gate] = pt
+    gbm = gbm_cluster
+
     # --- generate -----------------------------------------------------------------------
     priors = {int(g): float(p) for g, p in con.execute("""
         SELECT l.gate, avg(CASE WHEN l.label = 'cleared' THEN 1.0 ELSE 0.0 END)
@@ -661,13 +839,16 @@ def main() -> None:
         cid = r.get("cluster_id")
         r["precedents"] = [p for p in by_cluster.get(cid, []) if p["target_id"] != r["target_id"]][:8] if cid else []
         r["gate_rates"] = gate_rates.get(r["target_id"], {})
+        r["gbm"] = gbm.get(r["target_id"])
         if made["gate_judgement"] < quota["gate_judgement"]:
             rec = gate_judgement(r, rng, priors)
             if rec:
                 records.append(rec); made["gate_judgement"] += 1
         if made["pipeline_forecast"] < quota["pipeline_forecast"] and r["target_id"] not in seen_forecast:
             seen_forecast.add(r["target_id"])
-            records.append(pipeline_forecast(r, rng, priors)); made["pipeline_forecast"] += 1
+            rec = pipeline_forecast(r, rng, priors)
+            if rec:
+                records.append(rec); made["pipeline_forecast"] += 1
         if made["construct_recommend"] < quota["construct_recommend"]:
             rec = construct_recommend(r, rng)
             if rec:
@@ -708,6 +889,7 @@ def main() -> None:
             cid = r.get("cluster_id")
             r["precedents"] = [p for p in by_cluster.get(cid, []) if p["target_id"] != r["target_id"]][:8] if cid else []
             r["gate_rates"] = gate_rates.get(r["target_id"], {})
+            r["gbm"] = gbm.get(r["target_id"])
             for name, fn in (("gate_judgement", lambda: gate_judgement(r, rng, priors)),
                              ("pipeline_forecast", lambda: pipeline_forecast(r, rng, priors)),
                              ("construct_recommend", lambda: construct_recommend(r, rng)),
@@ -751,8 +933,10 @@ def main() -> None:
     rng.shuffle(temporal_rows)
     saved_by_cluster = by_cluster
     by_cluster = temporal_prec
+    gbm = gbm_temporal   # pre-2014 boosters: the only honest forecast for a 2014+ target
     test_temporal = eval_records(temporal_rows, 2000)
     by_cluster = saved_by_cluster
+    gbm = gbm_cluster
     with_prec = sum(1 for r in test_temporal if "Precedents:" in r["messages"][1]["content"])
     print(f"  temporal held-out: {len(test_temporal):,} records, "
           f"{with_prec:,} carrying a precedent table")

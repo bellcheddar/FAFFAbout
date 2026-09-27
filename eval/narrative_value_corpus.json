@@ -1,15 +1,15 @@
 {
   "source": "corpus",
-  "n": 24,
-  "template_echo_mean": 0.5713531273354021,
+  "n": 100,
+  "template_echo_mean": 0.6264723507859378,
   "template_echo_max": 1.0,
-  "responsiveness_mean_pairwise": 0.13538816850433494,
-  "names_a_wall": 24,
+  "responsiveness_mean_pairwise": 0.09826848771746191,
+  "names_a_wall": 100,
   "bottleneck_top1": 1.0,
   "warnings": [],
   "samples": [
-    "Gate-by-gate outlook:\n  selected -> cloned: 0.89 conditional, 0.89 cumulative\n  cloned -> expressed: 0.65 conditional, 0.58 cumulative\n  expressed -> soluble: 0.86 conditional, 0.50 cumulative\n  soluble -> purified: 0.75 conditional, 0.38 cumulative\n  purified -> crystallised: 0.35 conditional, 0.13 cumulative\n  crystallised -> diffracting: 0.89 conditional, 0.12 cumulative\n  diffracting -> structure: 0.89 conditional, 0.10 cumulative\n  structure -> deposited: 0.97 conditional, 0.10 cumulative\n\nPredicted bottleneck: purified -> crystallised (obtaining crystals).\nComparable targets in this cluster generally get through despite a disordered N-terminus that would be worth trimming and substantial length. Note that 1 of the 7 precedents shown above is censored: their files closed when the centre stopped reporting, so they are evidence of nothing either way and the real base is thinner than the count suggests.",
-    "Gate-by-gate outlook:\n  selected -> cloned: 0.58 conditional, 0.58 cumulative\n  cloned -> expressed: 0.57 conditional, 0.33 cumulative\n  expressed -> soluble: 0.35 conditional, 0.11 cumulative\n  soluble -> purified: 0.76 conditional, 0.09 cumulative\n  purified -> crystallised: 0.37 conditional, 0.03 cumulative\n  crystallised -> diffracting: 0.76 conditional, 0.02 cumulative\n  diffracting -> structure: 0.75 conditional, 0.02 cumulative\n  structure -> deposited: 0.97 conditional, 0.02 cumulative\n\nPredicted bottleneck: expressed -> soluble (getting soluble protein).\nThe precedent in this cluster is discouraging.",
-    "Gate-by-gate outlook:\n  selected -> cloned: 0.77 conditional, 0.77 cumulative\n  cloned -> expressed: 0.64 conditional, 0.49 cumulative\n  expressed -> soluble: 0.69 conditional, 0.34 cumulative\n  soluble -> purified: 0.76 conditional, 0.26 cumulative\n  purified -> crystallised: 0.37 conditional, 0.09 cumulative\n  crystallised -> diffracting: 0.76 conditional, 0.07 cumulative\n  diffracting -> structure: 0.75 conditional, 0.05 cumulative\n  structure -> deposited: 0.97 conditional, 0.05 cumulative\n\nPredicted bottleneck: purified -> crystallised (obtaining crystals).\nThere is little precedent here, and the intrinsic properties are unhelpful."
+    "Weakest point: selected -> cloned (cloning the gene into an expression vector).\nThe forecast puts the main risk at cloning the gene into an expression vector. Nothing in the sequence features points to that step in particular, so the forecast is carried by the archive's record for comparable targets. The precedent agrees: SSGCID-BuamA.00010.i got no further than selected. Treat this as a reasonable guide rather than a firm prediction. Bear in mind that 7% of this cluster's records are censored at centre closure rather than by any experimental result, so the effective evidence is thinner than the counts suggest.",
+    "Weakest point: purified -> crystallised (obtaining crystals).\nMost of the attrition in this forecast falls at obtaining crystals. The target's own properties are unremarkable for that step; the forecast rests on how comparable targets fared. CSGID-IDP01074 got past this point and reached deposited, so it is not a hard wall for this family. The evidence is thin, so this is a weak prior rather than a prediction. Bear in mind that 25% of this cluster's records are censored at centre closure rather than by any experimental result, so the effective evidence is thinner than the counts suggest.",
+    "Weakest point: cloned -> expressed (getting detectable expression).\nThe weakest point in this forecast is getting detectable expression. No single feature of this protein explains that step, so the risk comes from the archive's record rather than the sequence. No relative within 30% identity is in the archive, which leaves the target's own features to carry the forecast. With so little precedent, do not lean on this heavily."
   ]
 }

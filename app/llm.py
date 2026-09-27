@@ -116,16 +116,14 @@ def serving_intended_model() -> bool:
 def build_prompt(payload: dict) -> str:
     """The prompt shape the model was TRAINED on, not one invented here.
 
-    scripts/07_build_sft.py's pipeline_forecast task gives the model target features,
-    archive evidence and precedents, and asks it to produce the gate-by-gate outlook and
-    name the bottleneck itself. It is never shown a precomputed forecast.
+    From round 5, scripts/07_build_sft.py's pipeline_forecast task gives the model target
+    features, archive evidence, precedents AND the GBM's forecast (`fmt_forecast` there,
+    rebuilt here from the payload in the identical format), and trains it to narrate that
+    forecast: name its weakest point and explain it, with no numbers of its own.
 
-    An earlier version of this function handed over a "Computed forecast:" block of GBM
-    numbers and told the model they were "not yours to change" - a distribution appearing
-    in no training example. The model would have met it cold at serving time. The numbers
-    the model then writes are discarded by `strip_generated_numbers`, because the GBM's
-    figures are rendered beside the prose and two disagreeing sets of numbers on one page
-    is worse than one.
+    Round 04 and earlier trained the model to invent the gate vector, so this function then
+    deliberately withheld the GBM's numbers: a block the model had never seen in training
+    would have met it cold. The two sides must change together, and did on 2026-09-27.
     """
     t, f, ev = payload["target"], payload["features"], payload["evidence"]
     ladder = payload["ladder"]
@@ -174,10 +172,20 @@ def build_prompt(payload: dict) -> str:
         rows.append(f"  {p_['target_id']:<19} {p_['centre']:<9} "
                     f"{(p_.get('organism') or ''):<31} {stage:<16} {note}".rstrip())
 
+    # The GBM's forecast, in the exact format of 07_build_sft.py's fmt_forecast.
+    cond, bn = payload["conditional"], payload["bottleneck"]
+    fc, run = [], 1.0
+    for g, c in enumerate(cond):
+        run *= c
+        fc.append(f"  {ladder[g]} -> {ladder[g+1]}: {c:.2f} conditional, {run:.2f} cumulative")
+    forecast = ("Model forecast (gradient-boosted model; these numbers are fixed):\n" + "\n".join(fc)
+                + f"\n  weakest point: {bn['name']} -> {bn['next']} (largest loss of survival)")
+
     return ("Forecast the whole pipeline for this target.\n\n"
             "Target features:\n" + "\n".join(f"  {b}" for b in bits) + "\n\n"
             f"Archive evidence:\n{evidence}"
-            + (f"\n\nPrecedents:\n" + "\n".join(rows) if len(rows) > 1 else ""))
+            + (f"\n\nPrecedents:\n" + "\n".join(rows) if len(rows) > 1 else "")
+            + f"\n\n{forecast}")
 
 
 GATE_LINE = re.compile(r"^\s*\w[\w ]*->[\w ]*:\s*[0-9.]+\s*conditional.*$", re.M)

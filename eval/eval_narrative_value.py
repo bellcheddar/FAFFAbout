@@ -68,7 +68,7 @@ def mean_pairwise(texts: list[str]) -> float:
     return sum(jaccard(sh[i], sh[j]) for i, j in pairs) / len(pairs)
 
 
-BOTTLENECK = re.compile(r"Predicted bottleneck:\s*([\w ]+?)\s*(?:->|\(|\.|$)")
+BOTTLENECK = re.compile(r"(?:Predicted bottleneck|Weakest point):\s*([\w ]+?)\s*(?:->|\(|\.|$)")
 
 
 def stated_bottleneck(text: str) -> str | None:

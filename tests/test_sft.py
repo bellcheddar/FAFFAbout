@@ -33,7 +33,9 @@ def row(**kw):
                 target_construct_type="", host="ecoli", tag="his", protease="tev",
                 construct_start=None, construct_end=None, n_precedents=10,
                 n_precedents_cleared=8, cluster_base_rate=0.8, n_close_precedents=2,
-                cluster_censored_frac=0.05, precedents=[], gate_rates={})
+                cluster_censored_frac=0.05, precedents=[], gate_rates={},
+                # round 5: the GBM's per-gate forecast every prompt now carries
+                gbm=[0.8, 0.7, 0.7, 0.8, 0.3, 0.8, 0.8, 0.95])
     base.update(kw)
     return base
 
@@ -106,13 +108,22 @@ def test_gate_prompt_names_the_transition_not_just_the_stage():
     assert "cloned -> expressed" in rec["messages"][1]["content"]
 
 
-def test_gate_judgement_has_no_self_contradicting_verdict():
-    rec = sft.gate_judgement(row(gate=0, label="failed", n_precedents=20,
-                                 n_precedents_cleared=18), random.Random(0), PRIORS)
-    body = rec["messages"][2]["content"]
-    assert "Expected outcome" not in body
-    p = float(re.search(r": ([0-9.]+)", body).group(1))
-    assert p > 0.5, "the evidence says likely; the completion must not also say it stalls"
+def test_gate_judgement_verdict_follows_the_gbm_and_states_no_probability():
+    """Round 5: the verdict is in words and must agree with the GBM's estimate for the gate,
+    whatever this target's own label. A completion carrying its own probability would be a
+    second, competing set of numbers (CLAUDE.md rule 5)."""
+    good = ("Likely to clear.", "This step should go through.", "Good prospects at this step.")
+    bad = ("Unlikely to clear.", "This is where it is most likely to stop.", "Poor prospects at this step.")
+    for seed in range(6):
+        hi = sft.gate_judgement(row(gate=0, label="failed"), random.Random(seed), PRIORS)
+        lo = sft.gate_judgement(row(gate=4, label="cleared"), random.Random(seed), PRIORS)
+        assert hi["messages"][2]["content"].startswith(good), "GBM 0.80 must read as likely"
+        assert lo["messages"][2]["content"].startswith(("A real risk", "Doubtful", "This step could well")), \
+            "GBM 0.30 must read as a risk"
+        for rec in (hi, lo):
+            assert not re.search(r"\b0\.\d", rec["messages"][2]["content"]), "the model states no probability"
+            assert "Model estimate for this gate" in rec["messages"][1]["content"]
+        assert not lo["messages"][2]["content"].startswith(bad)
 
 
 # --------------------------------------------------------------------------- the corpus

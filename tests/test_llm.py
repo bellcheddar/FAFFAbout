@@ -75,15 +75,14 @@ def test_prompt_flags_censored_precedents():
     assert "censored at centre closure" in p
 
 
-def test_prompt_matches_the_shape_the_model_was_trained_on():
-    """scripts/07_build_sft.py's pipeline_forecast prompt carries features, evidence and
-    precedents, and NO precomputed forecast. Handing the model a "Computed forecast:"
-    block would be a distribution it has never seen."""
+def test_prompt_carries_the_gbm_forecast_the_model_narrates():
+    """From round 5 the model narrates the GBM's forecast (CLAUDE.md rule 5), so the prompt
+    carries it, weakest point included, in 07_build_sft.py's fmt_forecast format."""
     p = llm.build_prompt(payload())
     assert "Target features:" in p and "Archive evidence:" in p
-    assert "Computed forecast:" not in p
-    assert "conditional" not in p
-    assert "are not yours to change" not in p
+    assert "Model forecast (gradient-boosted model; these numbers are fixed):" in p
+    assert "  purified -> crystallised: 0.18 conditional," in p
+    assert "  weakest point: purified -> crystallised (largest loss of survival)" in p
 
 
 def test_the_models_own_numbers_are_stripped_before_display():
@@ -135,10 +134,10 @@ def test_serving_prompt_matches_the_training_prompt_shape():
         "precedents": [{"target_id": "MCSG-APC106035", "centre": "MCSG",
                         "organism": "Escherichia coli", "max_stage": 0, "censored": False}],
         "gate_rates": {},
+        # the same GBM numbers the serving payload carries, so the forecast blocks can be
+        # compared byte for byte
+        "gbm": payload()["conditional"],
     }
-    # pipeline_forecast gained `priors` when the gate vector stopped being filled from the
-    # target's own max_stage. The values here are irrelevant: this test compares prompt
-    # SHAPE, and the prompt is built before any conditional is computed.
     priors = {g: 0.5 for g in range(8)}
     train_prompt = sft.pipeline_forecast(row, random.Random(0), priors)["messages"][1]["content"]
     serve_prompt = llm.build_prompt(payload())
@@ -149,7 +148,11 @@ def test_serving_prompt_matches_the_training_prompt_shape():
 
     missing = sections(serve_prompt) - sections(train_prompt)
     assert not missing, f"serving prompt has sections training never saw: {missing}"
-    assert "conditional" not in serve_prompt, "the model computes the vector; it is not given one"
+
+    def forecast_block(text):
+        return text[text.index("Model forecast"):]
+    assert forecast_block(serve_prompt) == forecast_block(train_prompt), \
+        "the GBM block the model is served differs from the one it was trained on"
 
 
 # --------------------------------------------------------------------------- the guard
