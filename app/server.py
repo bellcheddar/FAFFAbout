@@ -144,7 +144,10 @@ def healthz():
         "search_index": (ROOT / "data" / "search" / "archiveDB.idx").exists(),
         "boosters_headline": (ROOT / "baseline" / "models" / "gate_0.txt").exists(),
         "boosters_declared": (ROOT / "baseline" / "models" / "declared_gate_0.txt").exists(),
-        "taxonomy": (ROOT / "data" / "external" / "nodes.dmp").exists(),
+        # What serving actually reads: the DuckDB taxonomy table (app/taxo.py, chosen by
+        # predict._USE_TAXO_TABLE). The NCBI dump is a build input and deploy.sh never ships
+        # it, so checking for nodes.dmp here made the first live /healthz a guaranteed 503.
+        "taxonomy": bool(P._USE_TAXO_TABLE),
     }
     ok = all(checks.values())
     return jsonify({"ok": ok, "checks": checks, "stats": archive_stats()}), (200 if ok else 503)
