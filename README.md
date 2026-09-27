@@ -2,7 +2,7 @@
 
 > **Fine-tuned Attrition Forecasting From Archives: know where your protein is likely to die before you order the gene.**
 
-![python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white) ![duckdb](https://img.shields.io/badge/duckdb-1.5-FFF000?logo=duckdb&logoColor=black) ![lightgbm](https://img.shields.io/badge/LightGBM-4.7-00897B) ![mlx-lm](https://img.shields.io/badge/mlx--lm-0.31-000000?logo=apple&logoColor=white) ![mmseqs2](https://img.shields.io/badge/MMseqs2-18-00897B) ![flask](https://img.shields.io/badge/flask-3.1-000000?logo=flask&logoColor=white) ![targets](https://img.shields.io/badge/targets-335%2C771-467FF7) ![censored](https://img.shields.io/badge/censored-19.03%25-9b51e0) ![tests](https://img.shields.io/badge/pytest-202%20passing-00897B) ![data](https://img.shields.io/badge/data-PSI%20TargetTrack%20%C2%B7%20CC--BY--SA--4.0-9b51e0) ![status](https://img.shields.io/badge/status-GBM%20%2B%20archive%20evidence-00897B) ![author](https://img.shields.io/badge/author-Marc%20C.%20Deller%2C%20D.Phil.-1C244B)
+![python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white) ![duckdb](https://img.shields.io/badge/duckdb-1.5-FFF000?logo=duckdb&logoColor=black) ![lightgbm](https://img.shields.io/badge/LightGBM-4.7-00897B) ![mlx-lm](https://img.shields.io/badge/mlx--lm-0.31-000000?logo=apple&logoColor=white) ![mmseqs2](https://img.shields.io/badge/MMseqs2-18-00897B) ![flask](https://img.shields.io/badge/flask-3.1-000000?logo=flask&logoColor=white) ![targets](https://img.shields.io/badge/targets-335%2C771-467FF7) ![censored](https://img.shields.io/badge/censored-19.03%25-9b51e0) ![tests](https://img.shields.io/badge/pytest-202%20passing-00897B) ![licence](https://img.shields.io/badge/code-MIT-1C244B) ![data](https://img.shields.io/badge/data-PSI%20TargetTrack%20%C2%B7%20CC--BY--SA--4.0-9b51e0) ![status](https://img.shields.io/badge/status-GBM%20%2B%20archive%20evidence-00897B) ![author](https://img.shields.io/badge/author-Marc%20C.%20Deller%2C%20D.Phil.-1C244B)
 
 <table>
 <tr>
@@ -181,9 +181,11 @@ Prefix each Python step with `.venv/bin/python`. Tests: `.venv/bin/python -m pyt
 - [x] **Language-model experiment:** five rounds; safe and faithful but judged useful in 0 of 10 cases, so dropped from the app
 - [ ] **ESM-2 features** to replace the local disorder predictor
 - [ ] **Deploy** to faffabout.mdeller.com
-- [ ] **Licence** for the code (the data is CC-BY-SA-4.0)
+- [x] **Licence:** code MIT (`LICENSE`); the archive data remains CC-BY-SA-4.0
 
 The full plan and a dated log of every decision are in `PROJECT_PLAN.md`; the original specification is `faffabout_build_spec_v1.md`.
+
+**Licence.** The code is released under the MIT licence (`LICENSE`). The PSI TargetTrack data it is built from is CC-BY-SA-4.0 (Zenodo 10.5281/zenodo.821654), and anything distributed that contains that data carries its terms.
 
 ---
 
