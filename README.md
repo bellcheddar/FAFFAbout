@@ -6,7 +6,7 @@
 
 <table>
 <tr>
-<td>🌐 <b>Website</b></td><td><a href="https://mdeller.com" target="_blank" rel="noopener noreferrer">mdeller.com</a></td>
+<td>🌐 <b>Website</b></td><td><a href="https://faffabout.mdeller.com" target="_blank" rel="noopener noreferrer">faffabout.mdeller.com</a></td>
 <td>✉️ <b>Contact</b></td><td><a href="mailto:marc@marcdeller.com">marc@marcdeller.com</a></td>
 <td>🐙 <b>GitHub</b></td><td><a href="https://github.com/bellcheddar/FAFFAbout" target="_blank" rel="noopener noreferrer">bellcheddar/FAFFAbout</a></td>
 </tr>
