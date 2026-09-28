@@ -148,6 +148,9 @@ def healthz():
         # predict._USE_TAXO_TABLE). The NCBI dump is a build input and deploy.sh never ships
         # it, so checking for nodes.dmp here made the first live /healthz a guaranteed 503.
         "taxonomy": bool(P._USE_TAXO_TABLE),
+        # A real query, not a file check: the first droplet deploy answered 200 here while
+        # every DuckDB view pointed at a Parquet path that only existed on the build machine.
+        "archive": archive_stats()["targets"] > 0,
     }
     ok = all(checks.values())
     return jsonify({"ok": ok, "checks": checks, "stats": archive_stats()}), (200 if ok else 503)

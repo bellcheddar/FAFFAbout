@@ -16,7 +16,9 @@ EnvironmentFile=-/opt/faffabout/.env
 ExecStart=/opt/faffabout/.venv/bin/gunicorn --config /opt/faffabout/deploy/gunicorn.conf.py server:app
 Restart=on-failure
 RestartSec=3
-MemoryHigh=1536M
+# 1.5G throttled every search: the 1.7 GB index was re-read from disk each time. 2.25G
+# measured about 1 s faster per forecast (8.2 s to 7.0 s); the extra is reclaimable page cache.
+MemoryHigh=2304M
 MemoryMax=2560M
 # Hardening
 NoNewPrivileges=true

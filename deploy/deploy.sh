@@ -6,7 +6,7 @@
 #
 # WHAT HAS TO SHIP, measured rather than guessed (2026-09-15):
 #
-#   data/faffabout.duckdb      159 MB   targets, censoring, labels, features, taxonomy
+#   data/faffabout_serving.duckdb  205 MB   real tables, built by scripts/build_serving_db.py
 #   data/search/               1.7 GB   MMseqs2 index: 0.4 s per search, or 4.1 s without it
 #   baseline/models/            30 MB   the boosters and their schema
 #   app/                       312 KB
@@ -38,7 +38,7 @@ SERVICE="${FAFFABOUT_SERVICE:-faffabout-web}"
 # FAFFABOUT_SSH_KEY names a deploy-only key, so nothing depends on ~/.ssh/config.
 # One shared connection for every step: the droplet rate-limits new SSH connections, and a
 # deploy that opened eight in a row was locked out mid-transfer on 2026-09-28.
-SSH=(ssh -o ControlMaster=auto -o "ControlPath=${TMPDIR:-/tmp}/faffabout-ssh-%C" -o ControlPersist=300)
+SSH=(ssh -o ControlMaster=auto -o "ControlPath=/tmp/faffabout-ssh-%C" -o ControlPersist=300)
 [[ -n "${FAFFABOUT_SSH_KEY:-}" ]] && SSH+=(-i "${FAFFABOUT_SSH_KEY/#\~/$HOME}" -o IdentitiesOnly=yes)
 
 GO=0; NO_INDEX=0; CODE_ONLY=0; NO_RESTART=0
@@ -61,7 +61,7 @@ if [[ -z "$DROPLET" ]]; then
 fi
 
 # --- preflight on what we are about to send ------------------------------------------
-for required in data/faffabout.duckdb baseline/models/gate_0.txt \
+for required in data/faffabout_serving.duckdb baseline/models/gate_0.txt \
                 baseline/models/schema.json app/server.py app/templates/rig.html; do
   [[ -e "$required" ]] || { echo "missing $required: build it before deploying" >&2; exit 1; }
 done
@@ -89,9 +89,13 @@ echo "mode        : $([[ $GO -eq 1 ]] && echo TRANSFER || echo 'DRY RUN (pass --
 echo "search index: $([[ $NO_INDEX -eq 1 ]] && echo 'excluded (4.1 s per search)' || echo 'included (0.4 s per search, 1.7 GB)')"
 echo
 
-# rsync creates the final directory but not missing parents
-[[ "$GO" -eq 1 ]] && "${SSH[@]}" "$DROPLET" \
-  "mkdir -p $REMOTE/app $REMOTE/scripts $REMOTE/deploy $REMOTE/baseline/models $REMOTE/data/parquet $REMOTE/data/search"
+# rsync creates the final directory but not missing parents. An if-block, not `[[ ]] &&`:
+# a failure on the right of && does not trip `set -e`, and an earlier version reported
+# success having transferred nothing.
+if [[ "$GO" -eq 1 ]]; then
+  "${SSH[@]}" "$DROPLET" \
+    "mkdir -p $REMOTE/app $REMOTE/scripts $REMOTE/deploy $REMOTE/baseline/models $REMOTE/data/parquet $REMOTE/data/search"
+fi
 echo "--- code ---"
 "${RSYNC[@]}" "${CODE_EXCLUDES[@]}" app/ "$DROPLET:$REMOTE/app/"
 "${RSYNC[@]}" "${CODE_EXCLUDES[@]}" scripts/features_seq.py scripts/taxonomy.py "$DROPLET:$REMOTE/scripts/"
@@ -102,11 +106,13 @@ echo "--- code ---"
 
 if [[ "$CODE_ONLY" -eq 0 ]]; then
   echo "--- data ---"
-  "${RSYNC[@]}" data/faffabout.duckdb "$DROPLET:$REMOTE/data/"
-  "${RSYNC[@]}" data/parquet/taxonomy_lookup.parquet "$DROPLET:$REMOTE/data/parquet/"
+  # The local data/faffabout.duckdb is VIEWS over Parquet at absolute build-machine paths,
+  # which resolve to nothing on the droplet. Ship the self-contained build under the name
+  # the app opens. Rebuild it after any change to the archive tables.
+  "${RSYNC[@]}" data/faffabout_serving.duckdb "$DROPLET:$REMOTE/data/faffabout.duckdb"
   DATA_EX=()
   [[ "$NO_INDEX" -eq 1 ]] && DATA_EX+=(--exclude 'archiveDB.idx*')
-  "${RSYNC[@]}" "${DATA_EX[@]}" data/search/ "$DROPLET:$REMOTE/data/search/"
+  "${RSYNC[@]}" ${DATA_EX[@]+"${DATA_EX[@]}"} data/search/ "$DROPLET:$REMOTE/data/search/"
 fi
 
 if [[ "$GO" -eq 1 && "$NO_RESTART" -eq 1 ]]; then

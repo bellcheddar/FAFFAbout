@@ -16,6 +16,8 @@
 
 ![The FAFFAbout Pipeline Rig showing a forecast for UniProt P0A6Y8, the E. coli chaperone DnaK. Eight gate lamps run from selected through to deposited; the first five are green and crystallised is lit amber as the predicted wall, with cumulative survival falling from 1.00 to 0.18 there. The console on the left carries the sequence, method, centre, host, tag and protease. Below the lamps, a panel headed What close relatives tried states that 1 of the 4 close relatives that reached purified got through to crystallised and that full-length constructs got further than truncated ones, then lists the most informative relatives with their constructs and how far each trial got. A precedent table with censored records greyed and dashed, counterfactual buttons and the caveats follow.](docs/screenshots/rig.png)
 
+**Try it:** https://faffabout.mdeller.com
+
 ## 💡 In one minute
 
 Getting from a gene to a protein structure is a long chain of experiments: clone the gene, express the protein, get it soluble, purify it, crystallise it, collect diffraction data, solve the structure, deposit it. Most attempts fail somewhere along the way, and the failures are expensive in time and money.
@@ -155,6 +157,8 @@ The language-model experiment is reproducible but not needed by the app: `script
 
 Prefix each Python step with `.venv/bin/python`. Tests: `.venv/bin/python -m pytest -q`.
 
+**Deploying.** `scripts/build_serving_db.py` builds a self-contained serving database (the local one is views over Parquet files); `deploy/deploy.sh --go` ships it with the code, boosters and search index, restarts the service and checks the live `/healthz`. A first deploy runs `deploy/deploy.sh --go --no-restart`, then `deploy/provision.sh` on the server.
+
 ## 🔬 For the technically curious
 
 **The ladder.** All 30 TargetTrack status values map onto nine stages (`config/status_map.yaml`), read from the archive's own controlled vocabulary. A *gate* is the transition out of a stage, so there are eight. NMR and cryo-EM milestones map onto their own ladders. "Expression tested" records that a test ran, not that protein was seen, so it does not advance past cloned. `work stopped` is never a stage or a failure label: its use is a centre convention (JCSG never uses it; CESG closes 93% of its targets with it).
@@ -176,11 +180,10 @@ Prefix each Python step with `.venv/bin/python`. Tests: `.venv/bin/python -m pyt
 - [x] **Data:** archive parsed, normalised, clustered and queryable; censoring derived (19.03%)
 - [x] **Labels, features and splits:** leakage-free by construction and checked by tests
 - [x] **GBM:** mean AUROC 0.839 on held-out families; ships in the app as the source of every number
-- [x] **Application:** built and working locally
+- [x] **Application:** live at https://faffabout.mdeller.com
 - [x] **Evidence panel:** what close relatives actually tried, read from the archive's trial records
 - [x] **Language-model experiment:** five rounds; safe and faithful but judged useful in 0 of 10 cases, so dropped from the app
 - [ ] **ESM-2 features** to replace the local disorder predictor
-- [ ] **Deploy** to faffabout.mdeller.com
 - [x] **Licence:** code MIT (`LICENSE`); the archive data remains CC-BY-SA-4.0
 
 The full plan and a dated log of every decision are in `PROJECT_PLAN.md`; the original specification is `faffabout_build_spec_v1.md`.
