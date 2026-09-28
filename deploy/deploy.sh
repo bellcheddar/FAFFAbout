@@ -24,6 +24,7 @@
 #   bash deploy/deploy.sh --go            # transfer and restart
 #   bash deploy/deploy.sh --go --no-index # leave the 1.7 GB index behind
 #   bash deploy/deploy.sh --code-only     # app + templates only, no data
+#   bash deploy/deploy.sh --go --no-restart   # FIRST deploy: ship, then run deploy/provision.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -32,15 +33,21 @@ cd "$ROOT"
 # .env supplies DROPLET (user@host) and REMOTE (absolute path). Never hard-code them.
 [[ -f .env ]] && set -a && . ./.env && set +a
 DROPLET="${FAFFABOUT_DROPLET:-${DROPLET:-}}"
-REMOTE="${FAFFABOUT_REMOTE:-/srv/faffabout}"
-SERVICE="${FAFFABOUT_SERVICE:-faffabout}"
+REMOTE="${FAFFABOUT_REMOTE:-/opt/faffabout}"      # the droplet keeps every app in /opt/<app>
+SERVICE="${FAFFABOUT_SERVICE:-faffabout-web}"
+# FAFFABOUT_SSH_KEY names a deploy-only key, so nothing depends on ~/.ssh/config.
+# One shared connection for every step: the droplet rate-limits new SSH connections, and a
+# deploy that opened eight in a row was locked out mid-transfer on 2026-09-28.
+SSH=(ssh -o ControlMaster=auto -o "ControlPath=${TMPDIR:-/tmp}/faffabout-ssh-%C" -o ControlPersist=300)
+[[ -n "${FAFFABOUT_SSH_KEY:-}" ]] && SSH+=(-i "${FAFFABOUT_SSH_KEY/#\~/$HOME}" -o IdentitiesOnly=yes)
 
-GO=0; NO_INDEX=0; CODE_ONLY=0
+GO=0; NO_INDEX=0; CODE_ONLY=0; NO_RESTART=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --go) GO=1; shift ;;
     --no-index) NO_INDEX=1; shift ;;
     --code-only) CODE_ONLY=1; shift ;;
+    --no-restart) NO_RESTART=1; shift ;;   # first deploy: ship, then run provision.sh
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -48,7 +55,8 @@ done
 if [[ -z "$DROPLET" ]]; then
   echo "No droplet configured. Put this in .env (which is gitignored):" >&2
   echo "  FAFFABOUT_DROPLET=root@203.0.113.10" >&2
-  echo "  FAFFABOUT_REMOTE=/srv/faffabout" >&2
+  echo "  FAFFABOUT_REMOTE=/opt/faffabout" >&2
+  echo "  FAFFABOUT_SSH_KEY=~/.ssh/faffabout_deploy" >&2
   exit 1
 fi
 
@@ -66,7 +74,10 @@ for p in "" declared_; do
   fi
 done
 
-RSYNC=(rsync -az --human-readable --info=stats1,progress2)
+# macOS ships openrsync (2.6.9-compatible), which has no --info; Homebrew's rsync 3.x does,
+# and --partial lets an interrupted 1.7 GB index transfer resume instead of restarting.
+RSYNC_BIN=$(command -v /opt/homebrew/bin/rsync || command -v rsync)
+RSYNC=("$RSYNC_BIN" -az --partial --human-readable --info=stats1,progress2 -e "${SSH[*]}")
 [[ "$GO" -eq 1 ]] || RSYNC+=(--dry-run)
 
 # NOTE: no --delete on the data tree. A deploy rsync that deletes has previously wiped
@@ -78,10 +89,15 @@ echo "mode        : $([[ $GO -eq 1 ]] && echo TRANSFER || echo 'DRY RUN (pass --
 echo "search index: $([[ $NO_INDEX -eq 1 ]] && echo 'excluded (4.1 s per search)' || echo 'included (0.4 s per search, 1.7 GB)')"
 echo
 
+# rsync creates the final directory but not missing parents
+[[ "$GO" -eq 1 ]] && "${SSH[@]}" "$DROPLET" \
+  "mkdir -p $REMOTE/app $REMOTE/scripts $REMOTE/deploy $REMOTE/baseline/models $REMOTE/data/parquet $REMOTE/data/search"
 echo "--- code ---"
 "${RSYNC[@]}" "${CODE_EXCLUDES[@]}" app/ "$DROPLET:$REMOTE/app/"
 "${RSYNC[@]}" "${CODE_EXCLUDES[@]}" scripts/features_seq.py scripts/taxonomy.py "$DROPLET:$REMOTE/scripts/"
-"${RSYNC[@]}" requirements.txt "$DROPLET:$REMOTE/"
+"${RSYNC[@]}" requirements-server.txt "$DROPLET:$REMOTE/"
+"${RSYNC[@]}" deploy/faffabout-web.service deploy/gunicorn.conf.py deploy/faffabout.nginx.conf \
+  deploy/provision.sh "$DROPLET:$REMOTE/deploy/"
 "${RSYNC[@]}" "${CODE_EXCLUDES[@]}" baseline/models/ "$DROPLET:$REMOTE/baseline/models/"
 
 if [[ "$CODE_ONLY" -eq 0 ]]; then
@@ -93,10 +109,14 @@ if [[ "$CODE_ONLY" -eq 0 ]]; then
   "${RSYNC[@]}" "${DATA_EX[@]}" data/search/ "$DROPLET:$REMOTE/data/search/"
 fi
 
-if [[ "$GO" -eq 1 ]]; then
+if [[ "$GO" -eq 1 && "$NO_RESTART" -eq 1 ]]; then
+  echo
+  echo "Transferred without restarting. Next: ssh to the droplet and run bash $REMOTE/deploy/provision.sh"
+elif [[ "$GO" -eq 1 ]]; then
   echo
   echo "--- restart and verify ---"
-  ssh "$DROPLET" "systemctl restart $SERVICE && sleep 4 && systemctl is-active $SERVICE"
+  # rsync runs as root, so hand the tree back to the service user before restarting
+  "${SSH[@]}" "$DROPLET" "chown -R faffabout:faffabout $REMOTE && systemctl restart $SERVICE && sleep 6 && systemctl is-active $SERVICE"
   # Verify by fetching the live page, not by trusting the restart.
   HOST="${FAFFABOUT_HOST:-faffabout.mdeller.com}"
   code=$(curl -s -o /dev/null -w '%{http_code}' "https://$HOST/healthz" || true)

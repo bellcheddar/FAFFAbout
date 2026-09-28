@@ -17,6 +17,7 @@ interface renders them grey and dashed rather than red.
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -33,6 +34,9 @@ MIN_IDENTITY = 0.30
 MIN_COVERAGE = 0.80
 CLOSE_IDENTITY = 0.70
 MAX_HITS = 2000
+# MMseqs2 threads: every core by default (8 on the Studio), overridable for a shared box
+# (the droplet has 2 cores and 13 other apps). Set FAFFABOUT_MMSEQS_THREADS in /opt/faffabout/.env.
+THREADS = int(os.environ.get("FAFFABOUT_MMSEQS_THREADS") or os.cpu_count() or 2)
 EVALUE = 1e-3
 N_GATES = 8
 
@@ -68,7 +72,7 @@ def md5(seq: str) -> str:
     return hashlib.md5(seq.encode()).hexdigest()
 
 
-def search(sequence: str, threads: int = 8, max_hits: int = MAX_HITS) -> list[dict]:
+def search(sequence: str, threads: int = THREADS, max_hits: int = MAX_HITS) -> list[dict]:
     """MMseqs2 easy-search of one sequence against the archive."""
     if not SEARCH_DB.with_suffix(".dbtype").exists() and not Path(str(SEARCH_DB) + ".dbtype").exists():
         raise FileNotFoundError(
@@ -97,7 +101,7 @@ def search(sequence: str, threads: int = 8, max_hits: int = MAX_HITS) -> list[di
 
 
 def precedents(sequence: str, con: duckdb.DuckDBPyConnection | None = None,
-               threads: int = 8, exclude_self: bool = True) -> list[Precedent]:
+               threads: int = THREADS, exclude_self: bool = True) -> list[Precedent]:
     """Search, filter to the clustering thresholds, and join onto the archive tables."""
     hits = search(sequence, threads=threads)
     q_md5 = md5(sequence)

@@ -1,0 +1,29 @@
+# systemd unit for the FAFFAbout web app (gunicorn behind nginx). Always on.
+# Installed to /etc/systemd/system/faffabout-web.service by deploy/provision.sh.
+# Mirrors alphafraud-web.service, plus a memory ceiling: the droplet has 3.8 GB, no swap
+# and a dozen other apps, and one MMseqs2 search maps up to 1.6 GB of index. The cgroup
+# limit means that under pressure the kernel reclaims or kills inside THIS service only.
+[Unit]
+Description=FAFFAbout web app (gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=faffabout
+Group=faffabout
+WorkingDirectory=/opt/faffabout
+EnvironmentFile=-/opt/faffabout/.env
+ExecStart=/opt/faffabout/.venv/bin/gunicorn --config /opt/faffabout/deploy/gunicorn.conf.py server:app
+Restart=on-failure
+RestartSec=3
+MemoryHigh=1536M
+MemoryMax=2560M
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/faffabout
+
+[Install]
+WantedBy=multi-user.target
