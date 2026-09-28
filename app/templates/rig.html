@@ -254,7 +254,7 @@ button,select,input,textarea{font-family:inherit;color:inherit;}
       <div class="console-body">
         <div class="fld">
           <label for="seq">Sequence · FASTA, UniProt or PDB</label>
-          <textarea id="seq" spellcheck="false" placeholder="P0A6Y8&#10;4XB7_A&#10;or paste a FASTA sequence"></textarea>
+          <textarea id="seq" spellcheck="false" placeholder="P0A6Y8  (Tab or Enter to try it)&#10;4XB7_A&#10;or paste a FASTA sequence"></textarea>
         </div>
         <div class="fld">
           <label for="method">Target method</label>
@@ -372,7 +372,8 @@ button,select,input,textarea{font-family:inherit;color:inherit;}
 <footer class="foot">
   FAFFAbout · PSI TargetTrack 2000–2017 (<a href="https://doi.org/10.5281/zenodo.821654" target="_blank" rel="noopener noreferrer">Zenodo 10.5281/zenodo.821654</a>, CC-BY-SA-4.0)<br>
   <a href="https://marcdeller.com" target="_blank" rel="noopener noreferrer">marcdeller.com</a> ·
-  <a href="mailto:marc@marcdeller.com">marc@marcdeller.com</a>
+  <a href="mailto:marc@marcdeller.com">marc@marcdeller.com</a> ·
+  <a href="https://github.com/bellcheddar/FAFFAbout" target="_blank" rel="noopener noreferrer">GitHub</a>
 </footer>
 
 <script>
@@ -563,7 +564,18 @@ document.querySelectorAll('.seg[data-group="tag"] button').forEach(b =>
 document.querySelectorAll('.sw button').forEach(b =>
   b.addEventListener('click', () => { state[b.dataset.flag] = !state[b.dataset.flag]; syncControls(); }));
 $('go').addEventListener('click', forecast);
-$('seq').addEventListener('keydown', e => { if(e.key === 'Enter' && (e.metaKey || e.ctrlKey)) forecast(); });
+/* The placeholder's first line is a working example. In an empty box, Tab fills it in and
+   Enter fills it in and runs it. Enter also runs a single identifier (UniProt or PDB); a
+   FASTA sequence needs its newlines, so there Enter types one and Cmd/Ctrl+Enter runs. */
+const EXAMPLE = 'P0A6Y8';
+$('seq').addEventListener('keydown', e => {
+  const box = $('seq'), v = box.value.trim();
+  if(e.key === 'Tab' && !e.shiftKey && !v){ e.preventDefault(); box.value = EXAMPLE; return; }
+  if(e.key !== 'Enter' || e.shiftKey || e.altKey) return;
+  if(e.metaKey || e.ctrlKey){ e.preventDefault(); forecast(); return; }
+  if(!v){ e.preventDefault(); box.value = EXAMPLE; forecast(); return; }
+  if(!v.startsWith('>') && !/\s/.test(v)){ e.preventDefault(); forecast(); }
+});
 
 document.querySelectorAll('.mode button').forEach(b =>
   b.addEventListener('click', () => {
